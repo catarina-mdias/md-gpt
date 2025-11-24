@@ -89,22 +89,22 @@ with st.sidebar:
 
     st.markdown("---")
     # Patient selector LIVES in the sidebar
-    st.markdown("**Active Patient**")
+    #st.markdown("**Active Patient**")
 
-    patient_options = {p["id"]: f"{p['name']} (ID: {p['id']})" for p in MOCK_PATIENTS}
-    st.selectbox(
-        "Choose patient",
-        options=list(patient_options.keys()),
-        format_func=lambda pid: patient_options[pid],
-        key="selected_patient_id",
-    )
+    #patient_options = {p["id"]: f"{p['name']} (ID: {p['id']})" for p in MOCK_PATIENTS}
+    #st.selectbox(
+     #   "Choose patient",
+      #  options=list(patient_options.keys()),
+       # format_func=lambda pid: patient_options[pid],
+        #key="selected_patient_id",
+    #)
 
     # Display details for the active patient
-    active_patient = get_active_patient()
-    if active_patient:
-        st.markdown(f"{active_patient['name']}  •  ID: {active_patient['id']}")
-        st.caption(f"Age: {active_patient['age']}  •  Sex: {active_patient['sex']}")
-        st.caption("Key Tags: " + ", ".join(active_patient["tags"]))
+   # active_patient = get_active_patient()
+   # if active_patient:
+    #    st.markdown(f"{active_patient['name']}  •  ID: {active_patient['id']}")
+    #    st.caption(f"Age: {active_patient['age']}  •  Sex: {active_patient['sex']}")
+      #  st.caption("Key Tags: " + ", ".join(active_patient["tags"]))
 
 
 # --------- Main Content Routing ---------
