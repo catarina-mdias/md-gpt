@@ -1,3 +1,4 @@
+# views/clinical_history.py
 import streamlit as st
 import pandas as pd
 
@@ -10,6 +11,42 @@ def _get_active_patient(patients_today):
     return None
 
 
+def _get_editable_tags(patient):
+    """
+    Keep per-patient editable key tags in session_state.
+
+    Returns the current list of tags and also updates from any text input.
+    """
+    key = f"patient_tags_{patient['id']}"
+
+    # Initialize from the original MOCK_PATIENTS definition, the first time
+    if key not in st.session_state:
+        st.session_state[key] = list(patient.get("tags", []))
+
+    current_tags = st.session_state[key]
+    tags_str_default = ", ".join(current_tags)
+
+    # Text input to edit tags (comma-separated)
+    new_tags_str = st.text_input(
+        "Key Tags (edit as needed, comma-separated)",
+        value=tags_str_default,
+        key=f"{key}_input",
+        help="Example: Hypertension, Penicillin Allergy, Mild Gastritis",
+    )
+
+    # Normalize input back into a list
+    new_tags = [
+        t.strip() for t in new_tags_str.split(",") if t.strip()
+    ]
+
+    # Update state if it changed
+    if new_tags != current_tags:
+        st.session_state[key] = new_tags
+        current_tags = new_tags
+
+    return current_tags
+
+
 def _patient_header(active_patient):
     with st.container(border=True):
         if not active_patient:
@@ -18,10 +55,11 @@ def _patient_header(active_patient):
             return
 
         st.markdown(f"### Active Patient: {active_patient['name']}")
-        st.caption(
-            f"Age: {active_patient['age']}  •  Sex: {active_patient['sex']}  •  "
-            "Key Tags: " + ", ".join(active_patient["tags"])
-        )
+        st.caption(f"Age: {active_patient['age']}  •  Sex: {active_patient['sex']}")
+
+        # 🔹 Editable Key Tags
+        editable_tags = _get_editable_tags(active_patient)
+        st.caption("Current Key Tags: " + (", ".join(editable_tags) or "None"))
 
 
 def show_clinical_history_page(patients_today):
@@ -44,7 +82,6 @@ def show_clinical_history_page(patients_today):
         with st.container(border=True):
             st.subheader("Select Topics to Show")
 
-            # You can tune these defaults later
             prev_appts = st.checkbox("Previous Appointments", value=False)
             lab_results = st.checkbox("Lab Results", value=False)
             surgical_history = st.checkbox("Surgical History", value=False)
@@ -69,8 +106,11 @@ def show_clinical_history_page(patients_today):
     st.markdown("")
 
     # ---------- Generate Summary button ----------
-    if st.button("Generate Summary (MD-GPT Summarizes)", use_container_width=True):
-        # For now, build a mocked “LLM summary” based on selections
+    if st.button(
+        "Generate Summary (MD-GPT Summarizes)",
+        key="generate_history_summary",
+        use_container_width=True,
+    ):
         selected_topics = []
         if prev_appts:
             selected_topics.append("previous appointments")
@@ -85,10 +125,16 @@ def show_clinical_history_page(patients_today):
 
         topics_text = ", ".join(selected_topics) if selected_topics else "no topics selected"
 
+        # Use the (possibly edited) tags in the mocked summary
+        tags_key = f"patient_tags_{active_patient['id']}"
+        tags_list = st.session_state.get(tags_key, active_patient.get("tags", []))
+        tags_text = ", ".join(tags_list) if tags_list else "None"
+
         summary_text = f"""
 Structured history summary for **{active_patient['name']}**  
 Detail level: **{detail_level}**  
-Included topics: **{topics_text}**
+Included topics: **{topics_text}**  
+Key tags in context: **{tags_text}**
 
 > This is a mocked summary. Here you will later call your LLM with the
 > patient's full record and the selected options.
@@ -110,5 +156,5 @@ Key Points:
 
         st.markdown(
             st.session_state[summary_key],
-            unsafe_allow_html=True,  # just to allow the bold/markdown we built
+            unsafe_allow_html=True,
         )
