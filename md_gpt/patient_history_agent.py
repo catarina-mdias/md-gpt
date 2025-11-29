@@ -19,6 +19,10 @@ from langgraph.graph import StateGraph, END
 import json
 from pathlib import Path
 
+# --- Langfuse imports -------------------------------------------------------
+from langfuse import get_client
+from langfuse.langchain import CallbackHandler
+
 
 # ---------------------------------------------------------------------------
 # Environment & basic setup
@@ -44,6 +48,9 @@ if not AGENT_API_USERNAME or not AGENT_API_PASSWORD:
         "Login will fail until both are set."
     )
 
+# Langfuse environment label (optional)
+LANGFUSE_TRACING_ENVIRONMENT = os.getenv("LANGFUSE_TRACING_ENVIRONMENT", "development")
+
 
 # ---------------------------------------------------------------------------
 # FastAPI app & CORS
@@ -64,6 +71,9 @@ app.add_middleware(
 
 # In-memory token store (for demo / course project)
 app.state.active_tokens: dict[str, str] = {}
+
+# Langfuse client (it will no-op if keys/host are not correctly set)
+langfuse_client = get_client()
 
 
 # ---------------------------------------------------------------------------
@@ -314,14 +324,46 @@ def run_clinical_history_agent(
     patient_id: str,
     categories: Optional[List[HistoryCategory]] = None,
     detail_level: DetailLevel = "medium",
+    session_id: Optional[str] = None,
 ) -> Dict[str, Any]:
+    """
+    Run the LangGraph clinical history agent, with optional Langfuse tracing.
+
+    - patient_id: patient identifier
+    - categories: list of categories to include
+    - detail_level: 'low' | 'medium' | 'high'
+    - session_id: optional session key to group traces in Langfuse
+    """
     initial: ClinicalHistoryState = {
         "patient_id": patient_id,
         "categories": categories
         or ["symptoms", "exams", "diagnosis", "therapeutics", "lab_results"],
         "detail_level": detail_level,
     }
-    result = clinical_history_graph.invoke(initial)
+
+    # If Langfuse is correctly configured, use it; otherwise run without callbacks
+    if langfuse_client.auth_check():
+        print("[Langfuse] Client authenticated. Tracing clinical-history run.")
+        handler = CallbackHandler()
+        config = {"callbacks": [handler]}
+
+        with langfuse_client.start_as_current_span(name="🩺-clinical-history-agent") as span:
+            span.update_trace(
+                input={
+                    "patient_id": patient_id,
+                    "categories": initial["categories"],
+                    "detail_level": detail_level,
+                },
+                session_id=session_id,
+                metadata={"environment": LANGFUSE_TRACING_ENVIRONMENT},
+            )
+            result = clinical_history_graph.invoke(initial, config=config)
+            span.update_trace(output=result.get("summary", ""))
+    else:
+        # No valid Langfuse config → just run the agent normally
+        print("[Langfuse] Not configured or auth failed. Running without tracing.")
+        result = clinical_history_graph.invoke(initial)
+
     return {
         "patient_id": patient_id,
         "categories": initial["categories"],
@@ -369,6 +411,7 @@ class ClinicalHistoryRequest(BaseModel):
     patient_id: str
     categories: Optional[List[HistoryCategory]] = None
     detail_level: DetailLevel = "medium"
+    session_id: Optional[str] = None  # optional, for tracing grouping
 
 
 class ClinicalHistoryResponse(BaseModel):
@@ -410,13 +453,14 @@ def clinical_history(
 ) -> ClinicalHistoryResponse:
     """
     Main endpoint:
-    - Streamlit passes patient_id, categories, and detail_level.
+    - Streamlit passes patient_id, categories, detail_level, and optionally session_id.
     - Requires valid X-Auth-Token header from /login.
     """
     result = run_clinical_history_agent(
         patient_id=payload.patient_id,
         categories=payload.categories,
         detail_level=payload.detail_level,
+        session_id=payload.session_id,
     )
 
     return ClinicalHistoryResponse(
@@ -425,5 +469,3 @@ def clinical_history(
         detail_level=result["detail_level"],
         summary=result["summary"],
     )
-
-
