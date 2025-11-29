@@ -1,6 +1,10 @@
 # views/clinical_history.py
+import os
+import requests
 import streamlit as st
-import pandas as pd
+
+
+API_BASE_URL = os.getenv("CLINICAL_API_URL", "http://localhost:8000")
 
 
 def _get_active_patient(patients_today):
@@ -19,7 +23,7 @@ def _get_editable_tags(patient):
     """
     key = f"patient_tags_{patient['id']}"
 
-    # Initialize from the original MOCK_PATIENTS definition, the first time
+    # Initialize from the original patient definition, the first time
     if key not in st.session_state:
         st.session_state[key] = list(patient.get("tags", []))
 
@@ -35,9 +39,7 @@ def _get_editable_tags(patient):
     )
 
     # Normalize input back into a list
-    new_tags = [
-        t.strip() for t in new_tags_str.split(",") if t.strip()
-    ]
+    new_tags = [t.strip() for t in new_tags_str.split(",") if t.strip()]
 
     # Update state if it changed
     if new_tags != current_tags:
@@ -51,7 +53,7 @@ def _patient_header(active_patient):
     with st.container(border=True):
         if not active_patient:
             st.markdown("### No active patient")
-            st.caption("Select a patient from the sidebar to view history.")
+            st.caption("Select a patient from the dashboard to view history.")
             return
 
         st.markdown(f"### Active Patient: {active_patient['name']}")
@@ -62,6 +64,77 @@ def _patient_header(active_patient):
         st.caption("Current Key Tags: " + (", ".join(editable_tags) or "None"))
 
 
+def _login_block():
+    """Simple login UI to obtain and store API token."""
+    if "api_token" in st.session_state and st.session_state.api_token:
+        st.success("Logged in to MD-GPT API")
+        return
+
+    with st.expander("Login to MD-GPT API", expanded=True):
+        username = st.text_input("API Username", key="api_username")
+        password = st.text_input("API Password", type="password", key="api_password")
+        if st.button("Login to API", key="login_api_button"):
+            if not username or not password:
+                st.error("Please enter username and password.")
+                return
+            try:
+                resp = requests.post(
+                    f"{API_BASE_URL}/login",
+                    json={"username": username, "password": password},
+                    timeout=10,
+                )
+                if resp.status_code == 200:
+                    token = resp.json().get("token")
+                    st.session_state["api_token"] = token
+                    st.success("Login successful. Token stored.")
+                else:
+                    st.error(f"Login failed: {resp.status_code} - {resp.text}")
+            except Exception as e:
+                st.error(f"Error calling API: {e}")
+
+
+def _call_clinical_history_api(
+    patient_id: str,
+    categories: list[str],
+    detail_level: str,
+    session_id: str | None = None,
+) -> str:
+    """Call the FastAPI /clinical-history endpoint and return the summary text."""
+    token = st.session_state.get("api_token")
+    if not token:
+        st.error("No API token. Please log in to the API first.")
+        return ""
+
+    # Use the same base URL configured in app.py sidebar
+    base_url = st.session_state.get("api_base", API_BASE_URL)
+
+    payload = {
+        "patient_id": patient_id,
+        "categories": categories,
+        "detail_level": detail_level,  # "low" | "medium" | "high"
+        "session_id": session_id,
+    }
+
+    try:
+        resp = requests.post(
+            f"{base_url}/clinical-history",
+            json=payload,
+            # IMPORTANT: header name must match FastAPI parameter x_auth_token
+            headers={"x_auth_token": token},
+            timeout=30,
+        )
+    except Exception as e:
+        st.error(f"Error calling clinical-history endpoint: {e}")
+        return ""
+
+    if resp.status_code != 200:
+        st.error(f"API error {resp.status_code}: {resp.text}")
+        return ""
+
+    data = resp.json()
+    return data.get("summary", "")
+
+
 def show_clinical_history_page(patients_today):
     active_patient = _get_active_patient(patients_today)
     _patient_header(active_patient)
@@ -69,31 +142,34 @@ def show_clinical_history_page(patients_today):
     if not active_patient:
         return
 
+    # ---------- API Login ----------
+    _login_block()
+
     st.markdown("## Patient Clinical History Summarization")
     st.caption(
-        "Instantly summarize a patient's entire history based on chosen topics "
-        "and level of detail."
+        "Summarize the patient's clinical history based on selected categories and detail level, "
+        "using the MD-GPT agent."
     )
 
     col_left, col_right = st.columns([2, 2])
 
-    # ---------- Topic selection ----------
+    # ---------- Category selection (matches backend categories) ----------
     with col_left:
         with st.container(border=True):
-            st.subheader("Select Topics to Show")
+            st.subheader("Select Categories to Include")
 
-            prev_appts = st.checkbox("Previous Appointments", value=False)
-            lab_results = st.checkbox("Lab Results", value=False)
-            surgical_history = st.checkbox("Surgical History", value=False)
-            medication_changes = st.checkbox("Medication Changes", value=True)
-            key_diagnosis = st.checkbox("Key Diagnosis Timeline", value=True)
+            include_symptoms = st.checkbox("Symptoms", value=True)
+            include_exams = st.checkbox("Exams", value=True)
+            include_diagnosis = st.checkbox("Diagnosis / Problems", value=True)
+            include_therapeutics = st.checkbox("Therapeutics", value=True)
+            include_lab_results = st.checkbox("Lab Results", value=True)
 
     # ---------- Detail level ----------
     with col_right:
         with st.container(border=True):
             st.subheader("Level of Detail")
 
-            detail_level = st.radio(
+            detail_level_label = st.radio(
                 "",
                 options=[
                     "Key Takeaways Only",
@@ -103,58 +179,56 @@ def show_clinical_history_page(patients_today):
                 index=1,  # default: Medium Detail
             )
 
+    # Map UI label to API detail level
+    if detail_level_label == "Key Takeaways Only":
+        api_detail_level = "low"
+    elif detail_level_label == "Comprehensive":
+        api_detail_level = "high"
+    else:
+        api_detail_level = "medium"
+
     st.markdown("")
 
     # ---------- Generate Summary button ----------
     if st.button(
-        "Generate Summary (MD-GPT Summarizes)",
-        key="generate_history_summary",
+        "Generate Summary (MD-GPT Agent)",
+        key="generate_history_summary_real",
         use_container_width=True,
     ):
-        selected_topics = []
-        if prev_appts:
-            selected_topics.append("previous appointments")
-        if lab_results:
-            selected_topics.append("lab results")
-        if surgical_history:
-            selected_topics.append("surgical history")
-        if medication_changes:
-            selected_topics.append("medication changes")
-        if key_diagnosis:
-            selected_topics.append("key diagnosis timeline")
+        categories = []
+        if include_symptoms:
+            categories.append("symptoms")
+        if include_exams:
+            categories.append("exams")
+        if include_diagnosis:
+            categories.append("diagnosis")
+        if include_therapeutics:
+            categories.append("therapeutics")
+        if include_lab_results:
+            categories.append("lab_results")
 
-        topics_text = ", ".join(selected_topics) if selected_topics else "no topics selected"
+        if not categories:
+            st.warning("Please select at least one category.")
+        else:
+            with st.spinner("Contacting MD-GPT agent and generating summary..."):
+                session_id = f"clinical-history-{active_patient['id']}"
+                summary_text = _call_clinical_history_api(
+                    patient_id=active_patient["id"],
+                    categories=categories,
+                    detail_level=api_detail_level,
+                    session_id=session_id,
+                )
 
-        # Use the (possibly edited) tags in the mocked summary
-        tags_key = f"patient_tags_{active_patient['id']}"
-        tags_list = st.session_state.get(tags_key, active_patient.get("tags", []))
-        tags_text = ", ".join(tags_list) if tags_list else "None"
-
-        summary_text = f"""
-Structured history summary for **{active_patient['name']}**  
-Detail level: **{detail_level}**  
-Included topics: **{topics_text}**  
-Key tags in context: **{tags_text}**
-
-> This is a mocked summary. Here you will later call your LLM with the
-> patient's full record and the selected options.
-
-Key Points:
-- Long-standing hypertension with gradual medication adjustments.
-- No recent hospitalizations; outpatient follow-ups stable.
-- Latest labs within acceptable range, with mild dyslipidemia.
-- Current treatment is well tolerated; no recent allergic reactions.
-"""
-
-        st.session_state[f"history_summary_{active_patient['id']}"] = summary_text
+            if summary_text:
+                st.session_state[f"history_summary_{active_patient['id']}"] = summary_text
 
     # ---------- Show summary if available ----------
-    summary_key = f"history_summary_{active_patient['id']}"
-    if summary_key in st.session_state:
-        st.markdown("---")
-        st.markdown("### Generated History Summary (Mock)")
-
-        st.markdown(
-            st.session_state[summary_key],
-            unsafe_allow_html=True,
-        )
+    if active_patient:
+        summary_key = f"history_summary_{active_patient['id']}"
+        if summary_key in st.session_state:
+            st.markdown("---")
+            st.markdown("### Generated History Summary")
+            st.markdown(
+                st.session_state[summary_key],
+                unsafe_allow_html=True,
+            )
