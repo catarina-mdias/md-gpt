@@ -1,0 +1,482 @@
+{
+  "patients": [
+    {
+      "patient_id": "P001",
+      "name": "Ana Silva",
+      "date_of_birth": "1980-05-12",
+      "sex": "F",
+      "chronic_conditions": [
+        "Hypertension",
+        "Prediabetes"
+      ],
+      "allergies": [
+        "Penicillin"
+      ],
+      "current_medication": [
+        "Amlodipine 5 mg od",
+        "Atorvastatin 20 mg od"
+      ],
+      "appointments": [
+        {
+          "appointment_id": "P001-A01",
+          "date": "2024-02-10",
+          "doctor": "Dr. Miguel Ferreira",
+          "reason_for_visit": "Annual check-up and blood pressure follow-up",
+          "summary": "Stable hypertension with mildly elevated LDL; lifestyle measures reinforced.",
+          "symptoms": [
+            "Occasional headaches for 2 months, mild, mainly evenings"
+          ],
+          "exams": [
+            "ECG (normal)",
+            "Lipid profile (LDL slightly above target)"
+          ],
+          "diagnosis": [
+            "Hypertension (I10, confirmed)",
+            "Hyperlipidemia (E78.5, confirmed)"
+          ],
+          "therapeutics": [
+            "Continue Amlodipine 5 mg od",
+            "Continue Atorvastatin 20 mg od",
+            "Reinforce low-salt diet and regular exercise"
+          ],
+          "lab_results": [
+            "Total Cholesterol 220 mg/dL (high)",
+            "LDL 140 mg/dL (high)",
+            "HbA1c 5.9% (borderline)"
+          ],
+          "follow_up": "Repeat lipid profile and HbA1c in 6 months."
+        },
+        {
+          "appointment_id": "P001-A02",
+          "date": "2024-09-05",
+          "doctor": "Dr. Miguel Ferreira",
+          "reason_for_visit": "Review of lab results",
+          "summary": "Progression to confirmed prediabetes; started metformin and referred to nutritionist.",
+          "symptoms": [],
+          "exams": [],
+          "diagnosis": [
+            "Prediabetes (R73.03, confirmed)"
+          ],
+          "therapeutics": [
+            "Start Metformin 500 mg bid",
+            "Referral to nutritionist for weight-loss program"
+          ],
+          "lab_results": [
+            "LDL 118 mg/dL (slightly high)",
+            "HbA1c 6.1% (high)"
+          ],
+          "follow_up": "Repeat HbA1c in 6 months; monitor tolerance to metformin."
+        },
+        {
+          "appointment_id": "P001-A03",
+          "date": "2025-01-20",
+          "doctor": "Dr. Joana Lopes",
+          "reason_for_visit": "Acute chest discomfort",
+          "summary": "Non-cardiac chest tightness likely related to stress; reassurance and stress-management advice.",
+          "symptoms": [
+            "Chest tightness for 3 days, moderate, non-radiating, worse with stress",
+            "Fatigue for 2 weeks, mild"
+          ],
+          "exams": [
+            "ECG (no acute ischemia)",
+            "Troponin (within normal range)"
+          ],
+          "diagnosis": [
+            "Somatoform autonomic dysfunction (F45.8, suspected)"
+          ],
+          "therapeutics": [
+            "Education on stress-management and return precautions"
+          ],
+          "lab_results": [
+            "Troponin I 0.01 ng/mL (normal)"
+          ],
+          "follow_up": "Review in 3–4 weeks or earlier if symptoms worsen."
+        }
+      ]
+    },
+    {
+      "patient_id": "P002",
+      "name": "João Pereira",
+      "date_of_birth": "1963-11-03",
+      "sex": "M",
+      "chronic_conditions": [
+        "Type 2 Diabetes",
+        "Chronic kidney disease stage 3"
+      ],
+      "allergies": [],
+      "current_medication": [
+        "Metformin 1000 mg bid",
+        "Losartan 50 mg od"
+      ],
+      "appointments": [
+        {
+          "appointment_id": "P002-A01",
+          "date": "2024-01-15",
+          "doctor": "Dr. Sara Nunes",
+          "reason_for_visit": "Diabetes follow-up",
+          "summary": "Poor glycemic control with CKD stage 3; SGLT2 inhibitor started.",
+          "symptoms": [
+            "Polyuria for 1 month, mild"
+          ],
+          "exams": [
+            "Urine microalbumin (moderately increased albuminuria)"
+          ],
+          "diagnosis": [
+            "Type 2 diabetes with diabetic CKD (E11.22, confirmed)"
+          ],
+          "therapeutics": [
+            "Start Empagliflozin 10 mg od",
+            "Continue Metformin and Losartan"
+          ],
+          "lab_results": [
+            "HbA1c 7.8% (high)",
+            "eGFR 48 mL/min/1.73m2 (low)"
+          ],
+          "follow_up": "Monitor renal function and HbA1c in 3 months."
+        },
+        {
+          "appointment_id": "P002-A02",
+          "date": "2024-06-20",
+          "doctor": "Dr. Sara Nunes",
+          "reason_for_visit": "Routine follow-up",
+          "summary": "Slight improvement in HbA1c; renal function stable but reduced.",
+          "symptoms": [],
+          "exams": [],
+          "diagnosis": [],
+          "therapeutics": [
+            "Reinforced renal-protective and low-salt diet"
+          ],
+          "lab_results": [
+            "HbA1c 7.1% (slightly high)",
+            "eGFR 45 mL/min/1.73m2 (low)"
+          ],
+          "follow_up": "Consider insulin if HbA1c remains >7% at next review."
+        },
+        {
+          "appointment_id": "P002-A03",
+          "date": "2025-02-02",
+          "doctor": "Dr. Sara Nunes",
+          "reason_for_visit": "Episodes of hypoglycemia",
+          "summary": "Recurrent mild hypoglycemia; Metformin dose adjusted and education provided.",
+          "symptoms": [
+            "Sweating and tremor for 2 weeks, moderate, mainly mid-morning"
+          ],
+          "exams": [],
+          "diagnosis": [
+            "Hypoglycemia (E16.2, suspected)"
+          ],
+          "therapeutics": [
+            "Reduce Metformin total daily dose (e.g., 850 mg bid)",
+            "Education on hypoglycemia recognition and management"
+          ],
+          "lab_results": [],
+          "follow_up": "Review in 2 months with glucose log."
+        }
+      ]
+    },
+    {
+      "patient_id": "P003",
+      "name": "Maria Costa",
+      "date_of_birth": "1996-03-22",
+      "sex": "F",
+      "chronic_conditions": [
+        "Migraine without aura",
+        "Generalized anxiety disorder"
+      ],
+      "allergies": [
+        "NSAIDs"
+      ],
+      "current_medication": [
+        "Sertraline 50 mg od"
+      ],
+      "appointments": [
+        {
+          "appointment_id": "P003-A01",
+          "date": "2024-03-01",
+          "doctor": "Dr. Inês Rocha",
+          "reason_for_visit": "Recurrent headaches",
+          "summary": "Typical migraine without aura; MRI normal; triptan started for acute attacks.",
+          "symptoms": [
+            "Pulsatile headache for 6 months, moderate, with photophobia and nausea"
+          ],
+          "exams": [
+            "Brain MRI (no structural abnormalities)"
+          ],
+          "diagnosis": [
+            "Migraine without aura (G43.0, confirmed)"
+          ],
+          "therapeutics": [
+            "Start Sumatriptan 50 mg as needed, max 2 doses/day",
+            "Headache diary and trigger avoidance"
+          ],
+          "lab_results": [],
+          "follow_up": "Review migraine frequency and response in 3 months."
+        },
+        {
+          "appointment_id": "P003-A02",
+          "date": "2024-09-15",
+          "doctor": "Dr. Inês Rocha",
+          "reason_for_visit": "Migraine worsening",
+          "summary": "Headache burden increased to >8 days/month; prophylactic beta-blocker started.",
+          "symptoms": [
+            "Frequent migraines for 3 months, moderate, impacting work"
+          ],
+          "exams": [],
+          "diagnosis": [
+            "Chronic migraine without aura (G43.709, suspected)"
+          ],
+          "therapeutics": [
+            "Start Propranolol 40 mg bid for prophylaxis"
+          ],
+          "lab_results": [],
+          "follow_up": "Monitor headache days and side effects; review in 4 months."
+        },
+        {
+          "appointment_id": "P003-A03",
+          "date": "2025-01-20",
+          "doctor": "Dr. Inês Rocha",
+          "reason_for_visit": "Migraine follow-up",
+          "summary": "Improved migraine control with prophylaxis; referred for CBT due to persistent anxiety.",
+          "symptoms": [
+            "Residual mild migraines 3–4 days/month"
+          ],
+          "exams": [],
+          "diagnosis": [],
+          "therapeutics": [
+            "Continue Propranolol",
+            "Referral for CBT for anxiety and stress management"
+          ],
+          "lab_results": [],
+          "follow_up": "Review in 6 months or if headaches worsen."
+        }
+      ]
+    },
+    {
+      "patient_id": "P004",
+      "name": "Rui Santos",
+      "date_of_birth": "2015-09-30",
+      "sex": "M",
+      "chronic_conditions": [
+        "Mild persistent asthma"
+      ],
+      "allergies": [],
+      "current_medication": [
+        "Budesonide inhaler 200 mcg bid"
+      ],
+      "appointments": [
+        {
+          "appointment_id": "P004-A01",
+          "date": "2024-04-05",
+          "doctor": "Dr. Luís Almeida",
+          "reason_for_visit": "Wheeze and cough at night",
+          "summary": "Clinical picture and spirometry compatible with mild persistent asthma; ICS and rescue inhaler started.",
+          "symptoms": [
+            "Cough for 2 weeks, moderate, worse at night",
+            "Wheezing for 2 weeks, moderate, triggered by exercise"
+          ],
+          "exams": [
+            "Spirometry (mild obstructive pattern with bronchodilator response)"
+          ],
+          "diagnosis": [
+            "Mild persistent asthma (J45.30, confirmed)"
+          ],
+          "therapeutics": [
+            "Start Budesonide inhaler 200 mcg bid",
+            "Start Salbutamol inhaler 100 mcg as needed",
+            "Education on inhaler technique and asthma action plan"
+          ],
+          "lab_results": [],
+          "follow_up": "Review in 3 months or earlier if control poor."
+        },
+        {
+          "appointment_id": "P004-A02",
+          "date": "2024-09-10",
+          "doctor": "Dr. Luís Almeida",
+          "reason_for_visit": "Asthma review",
+          "summary": "Asthma well controlled with rare night symptoms and minimal rescue use.",
+          "symptoms": [
+            "Occasional mild cough over last month"
+          ],
+          "exams": [],
+          "diagnosis": [],
+          "therapeutics": [
+            "Continue current inhaler regimen"
+          ],
+          "lab_results": [],
+          "follow_up": "Review in 6 months; consider step-down if still stable."
+        },
+        {
+          "appointment_id": "P004-A03",
+          "date": "2025-02-01",
+          "doctor": "Dr. Luís Almeida",
+          "reason_for_visit": "Asthma exacerbation with viral infection",
+          "summary": "Mild viral-triggered exacerbation treated with short course of oral steroids.",
+          "symptoms": [
+            "Fever for 3 days, mild",
+            "Wheeze for 3 days, moderate, improves with Salbutamol"
+          ],
+          "exams": [],
+          "diagnosis": [
+            "Asthma with acute exacerbation (J45.901, confirmed)"
+          ],
+          "therapeutics": [
+            "Prednisolone 1 mg/kg od for 5 days",
+            "Continue inhaled therapy"
+          ],
+          "lab_results": [],
+          "follow_up": "Review in 2 weeks to reassess control."
+        }
+      ]
+    },
+    {
+      "patient_id": "P005",
+      "name": "Carlos Mendes",
+      "date_of_birth": "1975-08-20",
+      "sex": "M",
+      "chronic_conditions": [
+        "Hyperlipidemia",
+        "Overweight"
+      ],
+      "allergies": [],
+      "current_medication": [],
+      "appointments": [
+        {
+          "appointment_id": "P005-A01",
+          "date": "2024-05-12",
+          "doctor": "Dr. Ana Rocha",
+          "reason_for_visit": "Cholesterol check",
+          "summary": "New hyperlipidemia diagnosed with high LDL; lifestyle measures initiated.",
+          "symptoms": [],
+          "exams": [
+            "Lipid panel (LDL high)"
+          ],
+          "diagnosis": [
+            "Hyperlipidemia (E78.5, confirmed)"
+          ],
+          "therapeutics": [
+            "Dietary counseling for low-saturated-fat diet",
+            "Exercise recommendation 150 min/week"
+          ],
+          "lab_results": [
+            "LDL 165 mg/dL (high)"
+          ],
+          "follow_up": "Repeat lipid panel in 6 months; consider statin if no improvement."
+        },
+        {
+          "appointment_id": "P005-A02",
+          "date": "2024-11-20",
+          "doctor": "Dr. Ana Rocha",
+          "reason_for_visit": "Follow-up of hyperlipidemia",
+          "summary": "LDL remains high despite lifestyle changes; statin started.",
+          "symptoms": [],
+          "exams": [
+            "Lipid panel (LDL still high)"
+          ],
+          "diagnosis": [],
+          "therapeutics": [
+            "Start Atorvastatin 20 mg od",
+            "Continue lifestyle measures"
+          ],
+          "lab_results": [
+            "LDL 155 mg/dL (high)"
+          ],
+          "follow_up": "Repeat lipids in 3–6 months; monitor for statin side effects."
+        },
+        {
+          "appointment_id": "P005-A03",
+          "date": "2025-04-10",
+          "doctor": "Dr. Ana Rocha",
+          "reason_for_visit": "Statin follow-up",
+          "summary": "Good LDL reduction with statin; no significant side effects.",
+          "symptoms": [],
+          "exams": [
+            "Lipid panel (LDL improved)"
+          ],
+          "diagnosis": [],
+          "therapeutics": [
+            "Continue Atorvastatin 20 mg od"
+          ],
+          "lab_results": [
+            "LDL 95 mg/dL (at target)"
+          ],
+          "follow_up": "Annual lipid panel; earlier if symptoms arise."
+        }
+      ]
+    },
+    {
+      "patient_id": "P006",
+      "name": "Sofia Ribeiro",
+      "date_of_birth": "1988-12-11",
+      "sex": "F",
+      "chronic_conditions": [
+        "Irritable bowel syndrome"
+      ],
+      "allergies": [
+        "Lactose intolerance"
+      ],
+      "current_medication": [],
+      "appointments": [
+        {
+          "appointment_id": "P006-A01",
+          "date": "2024-02-20",
+          "doctor": "Dr. Pedro Marques",
+          "reason_for_visit": "Abdominal pain and bloating",
+          "summary": "Symptoms compatible with IBS; basic labs and ultrasound unremarkable; dietary changes advised.",
+          "symptoms": [
+            "Recurrent crampy abdominal pain for 6 months, relieved by defecation",
+            "Bloating on most days"
+          ],
+          "exams": [
+            "Abdominal ultrasound (normal)"
+          ],
+          "diagnosis": [
+            "Irritable bowel syndrome (K58.0, suspected)"
+          ],
+          "therapeutics": [
+            "Advice on low-FODMAP diet",
+            "Food diary for trigger identification"
+          ],
+          "lab_results": [
+            "Basic blood tests (CBC, CRP) within normal limits"
+          ],
+          "follow_up": "Review in 3 months or earlier if alarm features appear."
+        },
+        {
+          "appointment_id": "P006-A02",
+          "date": "2024-06-05",
+          "doctor": "Dr. Pedro Marques",
+          "reason_for_visit": "IBS follow-up",
+          "summary": "Partial improvement with diet; antispasmodic introduced.",
+          "symptoms": [
+            "Less frequent abdominal cramps, still bothersome during stress"
+          ],
+          "exams": [],
+          "diagnosis": [],
+          "therapeutics": [
+            "Start antispasmodic medication as needed",
+            "Reinforce stress-management techniques"
+          ],
+          "lab_results": [],
+          "follow_up": "Review in 6 months or if symptoms worsen."
+        },
+        {
+          "appointment_id": "P006-A03",
+          "date": "2025-01-18",
+          "doctor": "Dr. Pedro Marques",
+          "reason_for_visit": "IBS and diet review",
+          "summary": "Good symptom control with diet and sporadic antispasmodic use.",
+          "symptoms": [
+            "Mild intermittent bloating, acceptable"
+          ],
+          "exams": [],
+          "diagnosis": [],
+          "therapeutics": [
+            "Continue current approach"
+          ],
+          "lab_results": [],
+          "follow_up": "Annual review unless symptoms change."
+        }
+      ]
+    }
+  ]
+}
