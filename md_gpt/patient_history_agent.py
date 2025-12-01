@@ -37,7 +37,7 @@ AGENT_API_USERNAME = os.getenv("AGENT_API_USERNAME")
 AGENT_API_PASSWORD = os.getenv("AGENT_API_PASSWORD")
 
 # Where to load patients from (your simplified JSON)
-PATIENTS_FILE = os.getenv("PATIENTS_FILE", "patients.json")
+PATIENTS_FILE = os.getenv("PATIENTS_FILE", "clinical_data.json")
 
 if not OPENAI_API_KEY:
     raise RuntimeError("OPENAI_API_KEY is not set.")
@@ -79,28 +79,84 @@ langfuse_client = get_client()
 # ---------------------------------------------------------------------------
 # Patients loading helpers (from JSON)
 # ---------------------------------------------------------------------------
-
-def load_patients_raw() -> Dict[str, Any]:
-    """Load the raw JSON structure from PATIENTS_FILE."""
-    path = Path(PATIENTS_FILE)
-    if not path.exists():
-        raise RuntimeError(f"Patients file not found at {path.resolve()}")
-    with path.open("r", encoding="utf-8") as f:
-        return json.load(f)
-
-
-def load_patients_by_id() -> Dict[str, Dict[str, Any]]:
+def load_db_tables() -> Dict[str, Any]:
     """
-    Returns a dict keyed by patient_id:
+    Load the new clinical database structure from PATIENTS_FILE.
+
+    Expected JSON shape:
     {
-      "P001": {...},
-      "P002": {...},
-      ...
+      "database_tables": {
+        "patient": [...],
+        "medication_history": [...],
+        "appointment": [...],
+        "exams": [...]
+      }
     }
     """
-    data = load_patients_raw()
-    patients_list: List[Dict[str, Any]] = data.get("patients", [])
-    return {p["patient_id"]: p for p in patients_list}
+    path = Path(PATIENTS_FILE)
+    if not path.exists():
+        raise RuntimeError(f"Clinical DB file not found at {path.resolve()}")
+
+    with path.open("r", encoding="utf-8") as f:
+        raw = json.load(f)
+
+    tables = raw.get("database_tables", {})
+    return {
+        "patient": tables.get("patient", []),
+        "medication_history": tables.get("medication_history", []),
+        "appointment": tables.get("appointment", []),
+        "exams": tables.get("exams", []),
+    }
+
+
+def _split_csv_field(value: Optional[str]) -> list[str]:
+    if not value:
+        return []
+    return [x.strip() for x in value.split(",") if x.strip()]
+
+
+def get_patient_record(patient_id: str) -> Dict[str, Any]:
+    """
+    Build a denormalized "patient record" from the new tables:
+
+    {
+      "patient": {...},                # basic demographics, chronic_conditions, allergies, tags
+      "appointments": [...],          # list of appointments for this patient
+      "medications": [...],           # list of meds for this patient
+      "exams": [...],                 # list of exams for this patient
+      "current_medications": [...],   # derived: meds with no end date
+    }
+    """
+    tables = load_db_tables()
+    patients = tables["patient"]
+    meds = tables["medication_history"]
+    appts = tables["appointment"]
+    exams = tables["exams"]
+
+    patient_row = next(
+        (p for p in patients if p.get("patient_id") == patient_id),
+        None,
+    )
+    if not patient_row:
+        return {}
+
+    patient_appts = [a for a in appts if a.get("patient_id") == patient_id]
+    patient_meds = [m for m in meds if m.get("patient_id") == patient_id]
+    patient_exams = [e for e in exams if e.get("patient_id") == patient_id]
+
+    current_meds = [
+        m
+        for m in patient_meds
+        if m.get("medication_end_date") in (None, "", "null")
+    ]
+
+    return {
+        "patient": patient_row,
+        "appointments": patient_appts,
+        "medications": patient_meds,
+        "exams": patient_exams,
+        "current_medications": current_meds,
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -136,90 +192,133 @@ def build_history_context(
     detail_level: DetailLevel,
 ) -> str:
     """
-    Build a textual context for the agent based on JSON data.
+    Build a textual context for the agent based on the NEW clinical_database.json schema.
 
-    Expects the simplified schema:
-      - patients[].appointments[].summary
-      - ... .symptoms (list[str]), .exams, .diagnosis, .therapeutics, .lab_results, follow_up
+    Uses:
+      - database_tables.patient
+      - database_tables.appointment
+      - database_tables.medication_history
+      - database_tables.exams
     """
-    patients = load_patients_by_id()
-    patient = patients.get(patient_id)
-    if not patient:
+    record = get_patient_record(patient_id)
+    if not record:
         return f"No patient found with id {patient_id}."
+
+    patient = record["patient"]
+    appointments = record["appointments"]
+    exams = record["exams"]
+    current_meds = record["current_medications"]
+
+    # ---- Patient overview ----
+    name = patient.get("patient_name")
+    sex = patient.get("sex")  # "M"/"F"
+    dob = patient.get("date_of_birth")
+
+    chronic_list = _split_csv_field(patient.get("chronic_conditions"))
+    allergy_list = _split_csv_field(patient.get("allergies"))
+    tags_list = _split_csv_field(patient.get("patient_tags"))
+
+    current_med_names = [m.get("medication_name") for m in current_meds if m.get("medication_name")]
 
     lines: List[str] = []
 
     lines.append(
-        f"Patient: {patient.get('name')} ({patient.get('sex')}), "
-        f"DOB: {patient.get('date_of_birth')}.\n"
-        f"Chronic conditions: {', '.join(patient.get('chronic_conditions', [])) or 'none'}.\n"
-        f"Allergies: {', '.join(patient.get('allergies', [])) or 'none'}.\n"
-        f"Current medication: {', '.join(patient.get('current_medication', [])) or 'none'}.\n\n"
+        f"Patient: {name} ({sex}), DOB: {dob}.\n"
+        f"Chronic conditions: {', '.join(chronic_list) or 'none'}.\n"
+        f"Allergies: {', '.join(allergy_list) or 'none'}.\n"
+        f"Current medication: {', '.join(current_med_names) or 'none'}.\n"
+        f"Patient tags: {', '.join(tags_list) or 'none'}.\n\n"
     )
 
+    # ---- Appointments + Exams ----
     lines.append("Previous appointments:\n")
 
-    appointments: List[Dict[str, Any]] = patient.get("appointments", [])
-    for appt in appointments:
+    for appt in sorted(appointments, key=lambda x: x.get("appointment_date", "")):
+        appt_id = appt.get("appointment_id")
+        appt_date = appt.get("appointment_date")
+        doctor = appt.get("appointment_doctor")
+        reason = appt.get("reason_for_visit")
+
         lines.append(
-            f"- Appointment {appt.get('appointment_id')} on {appt.get('date')} "
-            f"with {appt.get('doctor')}: {appt.get('reason_for_visit')}\n"
+            f"- Appointment {appt_id} on {appt_date} with {doctor}: {reason}\n"
         )
 
-        # Always include the appointment's high-level summary as first line
-        summary = appt.get("summary")
+        # High-level summary
+        summary = appt.get("appointment_summary")
         if summary:
             lines.append(f"  Summary: {summary}\n")
 
+        # Symptoms
         if "symptoms" in categories:
-            symptoms = appt.get("symptoms") or []
-            if symptoms:
+            symptoms_text = appt.get("appointment_symptoms") or ""
+            if symptoms_text:
                 if detail_level == "low":
-                    lines.append(f"  Symptoms: {len(symptoms)} items described.\n")
+                    lines.append("  Symptoms: described in brief.\n")
                 else:
-                    lines.append("  Symptoms:\n")
-                    for s in symptoms:
-                        lines.append(f"    - {s}\n")
+                    # Split on ';' or ',' to make bullets if possible
+                    raw_parts = [s.strip() for s in symptoms_text.replace(";", ",").split(",") if s.strip()]
+                    if len(raw_parts) <= 1:
+                        lines.append(f"  Symptoms: {symptoms_text}\n")
+                    else:
+                        lines.append("  Symptoms:\n")
+                        for s in raw_parts:
+                            lines.append(f"    - {s}\n")
 
-        if "exams" in categories:
-            exams = appt.get("exams") or []
-            if exams:
-                if detail_level == "low":
-                    lines.append(f"  Exams: {len(exams)} exams mentioned.\n")
-                else:
-                    lines.append("  Exams:\n")
-                    for e in exams:
-                        lines.append(f"    - {e}\n")
+        # Exams (from exams table, matched by patient_id + appointment_id)
+        related_exams = [
+            e for e in exams
+            if e.get("appointment_id") == appt_id and e.get("patient_id") == patient_id
+        ]
 
-        if "lab_results" in categories:
-            labs = appt.get("lab_results") or []
-            if labs:
-                if detail_level == "low":
-                    lines.append(f"  Lab results: {len(labs)} entries.\n")
-                else:
-                    lines.append("  Lab results:\n")
-                    for l in labs:
-                        lines.append(f"    - {l}\n")
+        if "exams" in categories and related_exams:
+            if detail_level == "low":
+                lines.append(f"  Exams: {len(related_exams)} exams mentioned.\n")
+            else:
+                lines.append("  Exams:\n")
+                for ex in related_exams:
+                    lines.append(
+                        f"    - {ex.get('exam_type')} "
+                        f"(date: {ex.get('exam_date')}, revised: {ex.get('exam_revised')})\n"
+                    )
 
+        # Lab results: we reuse exam entries as lab-type investigations
+        if "lab_results" in categories and related_exams:
+            if detail_level == "low":
+                lines.append(f"  Lab results: {len(related_exams)} entries.\n")
+            else:
+                lines.append("  Lab results (from exam records):\n")
+                for ex in related_exams:
+                    lines.append(f"    - {ex.get('exam_type')}\n")
+
+        # Diagnosis (string, may contain multiple codes separated by commas)
         if "diagnosis" in categories:
-            diag = appt.get("diagnosis") or []
-            if diag:
+            diag_text = appt.get("diagnosis") or ""
+            if diag_text:
+                diag_items = _split_csv_field(diag_text)
                 if detail_level == "low":
-                    lines.append(f"  Diagnosis: {len(diag)} items.\n")
+                    lines.append(f"  Diagnosis: {len(diag_items) or 1} items.\n")
                 else:
                     lines.append("  Diagnosis / problems:\n")
-                    for d in diag:
-                        lines.append(f"    - {d}\n")
+                    if diag_items:
+                        for d in diag_items:
+                            lines.append(f"    - {d}\n")
+                    else:
+                        lines.append(f"    - {diag_text}\n")
 
+        # Therapeutics (string)
         if "therapeutics" in categories:
-            tx = appt.get("therapeutics") or []
-            if tx:
+            tx_text = appt.get("therapeutics") or ""
+            if tx_text:
+                tx_items = _split_csv_field(tx_text)
                 if detail_level == "low":
-                    lines.append(f"  Therapeutics: {len(tx)} interventions.\n")
+                    lines.append(f"  Therapeutics: {len(tx_items) or 1} interventions.\n")
                 else:
                     lines.append("  Therapeutics:\n")
-                    for t in tx:
-                        lines.append(f"    - {t}\n")
+                    if tx_items:
+                        for t in tx_items:
+                            lines.append(f"    - {t}\n")
+                    else:
+                        lines.append(f"    - {tx_text}\n")
 
         follow_up = appt.get("follow_up")
         if follow_up and detail_level != "low":
