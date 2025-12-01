@@ -70,6 +70,9 @@ def _login_block():
         st.success("Logged in to MD-GPT API")
         return
 
+    # Use the same base URL configured in app.py sidebar
+    base_url = st.session_state.get("api_base", API_BASE_URL)
+
     with st.expander("Login to MD-GPT API", expanded=True):
         username = st.text_input("API Username", key="api_username")
         password = st.text_input("API Password", type="password", key="api_password")
@@ -79,7 +82,7 @@ def _login_block():
                 return
             try:
                 resp = requests.post(
-                    f"{API_BASE_URL}/login",
+                    f"{base_url}/login",
                     json={"username": username, "password": password},
                     timeout=10,
                 )
@@ -111,7 +114,7 @@ def _call_clinical_history_api(
     payload = {
         "patient_id": patient_id,
         "categories": categories,
-        "detail_level": detail_level,  # "low" | "medium" | "high"
+        "detail_level": detail_level,  # "low" | "high"
         "session_id": session_id,
     }
 
@@ -172,26 +175,23 @@ def show_clinical_history_page(patients_today):
             detail_level_label = st.radio(
                 "",
                 options=[
-                    "Key Takeaways Only",
-                    "Medium Detail",
-                    "Comprehensive",
+                    "Low detail",
+                    "High detail",
                 ],
-                index=1,  # default: Medium Detail
+                index=1,  # default: High detail
             )
 
-    # Map UI label to API detail level
-    if detail_level_label == "Key Takeaways Only":
+    # Map UI label to API detail level ("low" | "high")
+    if detail_level_label == "Low detail":
         api_detail_level = "low"
-    elif detail_level_label == "Comprehensive":
-        api_detail_level = "high"
     else:
-        api_detail_level = "medium"
+        api_detail_level = "high"
 
     st.markdown("")
 
     # ---------- Generate Summary button ----------
     if st.button(
-        "Generate Summary (MD-GPT Agent)",
+        "Generate Summary",
         key="generate_history_summary_real",
         use_container_width=True,
     ):
@@ -210,7 +210,7 @@ def show_clinical_history_page(patients_today):
         if not categories:
             st.warning("Please select at least one category.")
         else:
-            with st.spinner("Contacting MD-GPT agent and generating summary..."):
+            with st.spinner("Generating patient clinical history summary..."):
                 session_id = f"clinical-history-{active_patient['id']}"
                 summary_text = _call_clinical_history_api(
                     patient_id=active_patient["id"],

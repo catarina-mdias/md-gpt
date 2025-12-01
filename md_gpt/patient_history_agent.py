@@ -107,7 +107,8 @@ def load_patients_by_id() -> Dict[str, Dict[str, Any]]:
 # LangGraph agent for clinical history summarization
 # ---------------------------------------------------------------------------
 
-DetailLevel = Literal["low", "medium", "high"]
+# Only two levels now: "low" and "high"
+DetailLevel = Literal["low", "high"]
 HistoryCategory = Literal["symptoms", "exams", "diagnosis", "therapeutics", "lab_results"]
 
 
@@ -238,13 +239,15 @@ def retrieve_history_node(state: ClinicalHistoryState) -> ClinicalHistoryState:
         "therapeutics",
         "lab_results",
     ]
-    detail_level = state.get("detail_level", "medium")
+    # Default to "high" detail if not provided
+    detail_level = state.get("detail_level", "high")
     ctx = build_history_context(patient_id, categories, detail_level)
     return {"history_context": ctx}
 
 
 def summarize_history_node(state: ClinicalHistoryState) -> ClinicalHistoryState:
-    detail_level = state.get("detail_level", "medium")
+    # Default to "high" detail if not provided
+    detail_level = state.get("detail_level", "high")
     categories = state.get("categories") or [
         "symptoms",
         "exams",
@@ -254,16 +257,15 @@ def summarize_history_node(state: ClinicalHistoryState) -> ClinicalHistoryState:
     ]
     history_context = state["history_context"]
 
+    # Only two levels now:
+    # - "low": very concise + explicit patient overview instruction.
+    # - "high": old "medium" behaviour (3–5 key bullet points per category).
     if detail_level == "low":
         detail_instruction = (
-            "Be very concise. 1–3 short bullet points per selected category."
+            "Start with a short patient overview (1–2 sentences). "
+            "Then be very concise: 1–3 short bullet points per selected category."
         )
-    elif detail_level == "high":
-        detail_instruction = (
-            "Be detailed, include relevant numbers, dates, and evolution when available, "
-            "but stay clinically focused. Up to 5–8 bullets per category."
-        )
-    else:
+    else:  # "high"
         detail_instruction = (
             "Provide a succinct but informative summary. 3–5 key bullet points "
             "per selected category."
@@ -323,7 +325,7 @@ clinical_history_graph = build_clinical_history_graph()
 def run_clinical_history_agent(
     patient_id: str,
     categories: Optional[List[HistoryCategory]] = None,
-    detail_level: DetailLevel = "medium",
+    detail_level: DetailLevel = "high",
     session_id: Optional[str] = None,
 ) -> Dict[str, Any]:
     """
@@ -331,7 +333,7 @@ def run_clinical_history_agent(
 
     - patient_id: patient identifier
     - categories: list of categories to include
-    - detail_level: 'low' | 'medium' | 'high'
+    - detail_level: 'low' | 'high'
     - session_id: optional session key to group traces in Langfuse
     """
     initial: ClinicalHistoryState = {
@@ -410,7 +412,7 @@ def verify_token(
 class ClinicalHistoryRequest(BaseModel):
     patient_id: str
     categories: Optional[List[HistoryCategory]] = None
-    detail_level: DetailLevel = "medium"
+    detail_level: DetailLevel = "high"
     session_id: Optional[str] = None  # optional, for tracing grouping
 
 
@@ -453,8 +455,9 @@ def clinical_history(
 ) -> ClinicalHistoryResponse:
     """
     Main endpoint:
-    - Streamlit passes patient_id, categories, detail_level, and optionally session_id.
-    - Requires valid X-Auth-Token header from /login.
+    - Streamlit passes patient_id, categories, detail_level ('low' | 'high'),
+      and optionally session_id.
+    - Requires valid x_auth_token header from /login.
     """
     result = run_clinical_history_agent(
         patient_id=payload.patient_id,
