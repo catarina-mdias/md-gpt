@@ -151,39 +151,76 @@ def _compute_age(dob_str: str) -> int:
         return 0
 
 
+def _split_csv_field(value: str | None) -> list[str]:
+    if not value:
+        return []
+    return [x.strip() for x in value.split(",") if x.strip()]
+
+
 def load_patients_for_ui():
     """
-    Load patients.json (same used by the API) and adapt it
+    Load clinical_database.json and adapt the patient table
     to the structure the views expect.
+
+    Uses: database_tables.patient
     """
-    patients_file = os.getenv("PATIENTS_FILE", "md_gpt/patients.json")
-    path = Path(patients_file)
+    patients_file_env = os.getenv("PATIENTS_FILE")
+    if patients_file_env:
+        path = Path(patients_file_env)
+    else:
+        # Fallbacks relative to this file
+        root = Path(__file__).resolve().parent
+        candidate_root = root / "clinical_data.json"
+        candidate_md_gpt = root / "md_gpt" / "clinical_data.json"
+
+        if candidate_root.exists():
+            path = candidate_root
+        elif candidate_md_gpt.exists():
+            path = candidate_md_gpt
+        else:
+            raise RuntimeError(
+                "clinical_data.json not found. Looked for:\n"
+                f"- {candidate_root}\n"
+                f"- {candidate_md_gpt}\n"
+                "Set PATIENTS_FILE in your .env if it's stored elsewhere."
+            )
+
     if not path.exists():
-        raise RuntimeError(f"patients.json not found at {path.resolve()}")
+        raise RuntimeError(f"clinical_data.json not found at {path.resolve()}")
 
     with path.open("r", encoding="utf-8") as f:
-        data = json.load(f)
+        raw = json.load(f)
+
+    tables = raw.get("database_tables", {})
+    patients_table = tables.get("patient", [])
 
     ui_patients = []
     base_hour = 9
 
-    for idx, p in enumerate(data.get("patients", [])):
-        age = _compute_age(p.get("date_of_birth", "1970-01-01"))
+    for idx, p in enumerate(patients_table):
+        pid = p.get("patient_id")
+        name = p.get("patient_name")
+        dob = p.get("date_of_birth", "1970-01-01")
         sex_raw = p.get("sex", "U")
         sex = {"M": "Male", "F": "Female"}.get(sex_raw, "Unknown")
 
-        # Simple fake schedule info just for the dashboard
+        chronic_list = _split_csv_field(p.get("chronic_conditions"))
+        allergy_list = _split_csv_field(p.get("allergies"))
+        tags_list = _split_csv_field(p.get("patient_tags"))
+
+        # Simple fake schedule just for UI
         time_str = f"{base_hour + idx:02d}:00"
-        chronic = p.get("chronic_conditions", [])
-        reason = f"Follow-up for {chronic[0]}" if chronic else "General check-up"
+        main_reason = chronic_list[0] if chronic_list else "General check-up"
+        reason = f"Follow-up: {main_reason}"
 
         ui_patients.append(
             {
-                "id": p["patient_id"],  # <-- maps to JSON patient_id
-                "name": p["name"],
-                "age": age,
+                "id": pid,
+                "name": name,
+                "age": _compute_age(dob),
                 "sex": sex,
-                "tags": chronic + p.get("allergies", []),
+                # Tags used by dashboard + clinical history view
+                "tags": tags_list or (chronic_list + allergy_list),
                 "time": time_str,
                 "reason": reason,
             }
