@@ -1,89 +1,84 @@
 """
-FastAPI service for comparing two lab exam reports using a LangChain LLM agent.
-Now also mounts an MCP server under /mcp, but keeps the original response
-structure: { patient_id, summary } where `summary` is markdown (ideally a table).
+Exam comparison agent logic.
+
+This module provides the pure LLM / LangChain logic to compare two lab exam
+reports and return a single markdown summary (ideally a table).
+
+It is intentionally **framework-agnostic**: there is no FastAPI app, no
+authentication, and no MCP mounting here. All HTTP / auth concerns are handled
+in the unified `api.py` module.
+
+Public entry point:
+    - run_exam_comparison_agent(payload: ExamComparisonRequest) -> dict
 """
 
 import os
 from typing import Any, Dict, List, Optional
 
 from dotenv import load_dotenv
-from fastapi import Depends, FastAPI, Header, HTTPException
-from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from langchain_openai import ChatOpenAI
 from langchain_core.messages import SystemMessage, HumanMessage
 
-# ⬇️ MCP server import (keep your existing exams_mcp_server.py as is)
-from md_gpt.exams_mcp_server import mcp
+# --- Langfuse imports -------------------------------------------------------
+from langfuse import get_client
+from langfuse.langchain import CallbackHandler
+
+
+# ---------------------------------------------------------------------------
+# Environment & basic setup
+# ---------------------------------------------------------------------------
 
 load_dotenv()
 
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
 
-AGENT_API_USERNAME = os.getenv("AGENT_API_USERNAME")
-AGENT_API_PASSWORD = os.getenv("AGENT_API_PASSWORD")
-
 if not OPENAI_API_KEY:
     raise RuntimeError("OPENAI_API_KEY is not set.")
 
-if not AGENT_API_USERNAME or not AGENT_API_PASSWORD:
-    print(
-        "[Auth] Warning: AGENT_API_USERNAME or AGENT_API_PASSWORD is missing. "
-        "Login will fail until both are set."
-    )
+# Langfuse environment label (optional)
+LANGFUSE_TRACING_ENVIRONMENT = os.getenv("LANGFUSE_TRACING_ENVIRONMENT", "development")
 
-# Build MCP ASGI app and reuse its lifespan context
-mcp_app = mcp.streamable_http_app()
+# Langfuse client (it will no-op if keys/host are not correctly set)
+langfuse_client = get_client()
 
-app = FastAPI(
-    title="Exam Comparison Agent API",
-    description="Compare two exam reports and summarize key differences.",
-    lifespan=mcp_app.router.lifespan_context,
-)
-
-# Mount MCP under /mcp (MCP client can talk to this)
-app.mount("/mcp", mcp_app, name="mcp")
-
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
-
-# In-memory token store
-app.state.active_tokens: dict[str, str] = {}
-
+# Global LLM instance reused across calls
 llm = ChatOpenAI(
     model=OPENAI_MODEL,
     temperature=0,
     api_key=OPENAI_API_KEY,
 )
 
-
-class LoginRequest(BaseModel):
-    username: str
-    password: str
-
-
-class LoginResponse(BaseModel):
-    message: str
-    token: str
-
-
+# Maximum characters from each exam that will be sent to the LLM
 MAX_EXAM_CHARS = int(os.getenv("EXAM_COMPARISON_MAX_CHARS", "6000"))
 
 
+# ---------------------------------------------------------------------------
+# Pydantic models (shared with FastAPI layer in api.py)
+# ---------------------------------------------------------------------------
+
+
 class ExamDocument(BaseModel):
+    """
+    A single exam report as free text, with some metadata used for context.
+    """
+
     label: str
     exam_date: Optional[str] = None
     content: str
 
 
 class ExamComparisonRequest(BaseModel):
+    """
+    Request schema for the exam comparison agent.
+
+    - patient_id / patient_name: optional, used only as context in the prompt.
+    - exam_a / exam_b: two exam documents to compare.
+    - focus_markers: optional list of biomarkers to pay special attention to.
+    - session_id: optional session key used only for Langfuse trace grouping.
+    """
+
     patient_id: Optional[str] = None
     patient_name: Optional[str] = None
     exam_a: ExamDocument
@@ -93,52 +88,63 @@ class ExamComparisonRequest(BaseModel):
 
 
 class ExamComparisonResponse(BaseModel):
+    """
+    Response schema from the exam comparison agent.
+
+    - patient_id: echoes the input patient_id (if provided).
+    - summary: markdown string, ideally a table with the most relevant
+      marker variations between Exam A and B.
+    """
+
     patient_id: Optional[str]
     summary: str
 
 
-def create_token(username: str) -> str:
-    from uuid import uuid4
-
-    return f"token-{uuid4()}-{username}"
-
-
-def save_token(token: str, username: str) -> None:
-    app.state.active_tokens[token] = username
-
-
-def verify_token(
-    x_auth_token: str = Header(..., convert_underscores=False),
-) -> str:
-    """
-    Auth header matches your Streamlit frontend:
-        headers={"x_auth_token": token}
-    """
-    username = app.state.active_tokens.get(x_auth_token)
-    if not username:
-        raise HTTPException(status_code=401, detail="Missing or invalid authentication token")
-    return username
+# ---------------------------------------------------------------------------
+# Internal helpers
+# ---------------------------------------------------------------------------
 
 
 def _truncate_text(text: str) -> str:
+    """
+    Truncate the exam text to MAX_EXAM_CHARS characters to keep the context
+    manageable for the LLM.
+    """
     if len(text) <= MAX_EXAM_CHARS:
         return text
     return text[:MAX_EXAM_CHARS] + "\n... [truncated]"
 
 
 def _format_exam_document(doc: ExamDocument) -> str:
+    """
+    Format an exam document into a labeled block for the prompt.
+    """
     header = f"{doc.label} (Date: {doc.exam_date or 'unknown'})"
     body = _truncate_text(doc.content.strip())
     return f"{header}\n{body}\n"
 
 
+# ---------------------------------------------------------------------------
+# Public agent entry point
+# ---------------------------------------------------------------------------
+
+
 def run_exam_comparison_agent(payload: ExamComparisonRequest) -> Dict[str, Any]:
     """
-    Same behavior as your original version:
-    - LLM returns a single markdown summary (ideally a table with columns:
-      Marker | Exam A | Exam B | Change).
-    - No JSON schema; just markdown in `summary`.
+    Compare Exam B against Exam A using an LLM and return a single markdown
+    summary (ideally a table) describing the most relevant lab marker changes.
+
+    This preserves the behavior of the original agent:
+    - Output is **not** structured JSON – just a markdown `summary` string.
+    - The table format is recommended but not strictly enforced, so the agent
+      can fall back to concise bullet points if necessary.
+
+    Langfuse:
+    - If Langfuse is correctly configured (auth_check passes), this function
+      will trace the LLM call with a span named "🧪-exams-comparison-agent".
+    - Otherwise, it just calls the LLM without callbacks.
     """
+    # Build an optional clause focusing on specific biomarkers
     focus_clause = ""
     if payload.focus_markers:
         focus_clause = (
@@ -170,39 +176,41 @@ def run_exam_comparison_agent(payload: ExamComparisonRequest) -> Dict[str, Any]:
         "Compare Exam B against Exam A."
     )
 
-    response = llm.invoke([system_msg, HumanMessage(content=human_content)])
-    summary = response.content.strip()
+    messages = [system_msg, HumanMessage(content=human_content)]
+
+    # Default: no callbacks / no tracing
+    summary: str
+
+    if langfuse_client.auth_check():
+        # Langfuse tracing path
+        print("[Langfuse] Client authenticated. Tracing exams-comparison run.")
+        handler = CallbackHandler()
+        config = {"callbacks": [handler]}
+
+        with langfuse_client.start_as_current_span(
+            name="🧪-exams-comparison-agent"
+        ) as span:
+            span.update_trace(
+                input={
+                    "patient_id": payload.patient_id,
+                    "patient_name": payload.patient_name,
+                    "exam_a_label": payload.exam_a.label,
+                    "exam_b_label": payload.exam_b.label,
+                    "focus_markers": payload.focus_markers,
+                },
+                session_id=payload.session_id,
+                metadata={"environment": LANGFUSE_TRACING_ENVIRONMENT},
+            )
+            response = llm.invoke(messages, config=config)
+            summary = (response.content or "").strip()
+            span.update_trace(output=summary)
+    else:
+        # No valid Langfuse config → just run the LLM normally
+        print("[Langfuse] Not configured or auth failed. Running without tracing.")
+        response = llm.invoke(messages)
+        summary = (response.content or "").strip()
 
     return {
         "patient_id": payload.patient_id,
         "summary": summary,
     }
-
-
-@app.get("/health")
-def health() -> Dict[str, str]:
-    return {"status": "ok"}
-
-
-@app.post("/login", response_model=LoginResponse)
-def login(credentials: LoginRequest) -> LoginResponse:
-    if not AGENT_API_USERNAME or not AGENT_API_PASSWORD:
-        raise HTTPException(status_code=500, detail="Server credentials are not configured")
-
-    if credentials.username != AGENT_API_USERNAME or credentials.password != AGENT_API_PASSWORD:
-        raise HTTPException(status_code=401, detail="Invalid username or password")
-
-    token = create_token(credentials.username)
-    save_token(token, credentials.username)
-    return LoginResponse(message=f"Welcome back, {credentials.username}!", token=token)
-
-
-@app.post("/exams-comparison", response_model=ExamComparisonResponse)
-def compare_exams(
-    payload: ExamComparisonRequest,
-    username: str = Depends(verify_token),
-) -> ExamComparisonResponse:
-    result = run_exam_comparison_agent(payload)
-    return ExamComparisonResponse(**result)
-
-
