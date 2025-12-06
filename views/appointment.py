@@ -8,6 +8,11 @@ from datetime import date
 # Base URL for the appointment summarization API
 APPOINTMENT_API_BASE = os.getenv("APPOINTMENT_API_URL", "http://localhost:10001")
 DEFAULT_DOCTOR_NAME = os.getenv("DEFAULT_DOCTOR_NAME", "Dr. MD-GPT")
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+TRANSCRIPTION_MODEL = os.getenv("OPENAI_TRANSCRIPTION_MODEL", "whisper-1")
+TRANSCRIPTION_ENDPOINT = os.getenv(
+    "OPENAI_TRANSCRIPTION_URL", "https://api.openai.com/v1/audio/transcriptions"
+)
 
 
 def _get_active_patient(patients_today):
@@ -40,6 +45,8 @@ def _get_patient_appt_state(patient_id: str):
             "summary": None,
             "editing_summary": False,
             "appointment_id": None,
+            "transcript": None,
+            "summary_fields": None,
         }
     return st.session_state[key]
 
@@ -66,6 +73,63 @@ def _patient_header(active_patient):
 
 
 # ---------- API helpers for appointment summarization ----------
+
+
+def _transcribe_audio_file(uploaded_file) -> str:
+    """
+    Send the uploaded audio file to the OpenAI transcription endpoint
+    and return the transcript text.
+    """
+    if not uploaded_file:
+        st.error("Please upload an audio file before transcribing.")
+        return ""
+
+    if not OPENAI_API_KEY:
+        st.error("OPENAI_API_KEY is not configured. Cannot transcribe audio.")
+        return ""
+
+    audio_bytes = uploaded_file.getvalue()
+    files = {
+        "file": (
+            uploaded_file.name,
+            audio_bytes,
+            uploaded_file.type or "audio/mpeg",
+        )
+    }
+    data = {"model": TRANSCRIPTION_MODEL}
+    headers = {"Authorization": f"Bearer {OPENAI_API_KEY}"}
+
+    try:
+        resp = requests.post(
+            TRANSCRIPTION_ENDPOINT,
+            headers=headers,
+            data=data,
+            files=files,
+            timeout=90,
+        )
+        resp.raise_for_status()
+    except requests.RequestException as exc:
+        details = ""
+        if getattr(exc, "response", None) is not None:
+            try:
+                details = exc.response.text
+            except Exception:
+                details = ""
+        error_msg = f"Transcription failed: {exc}"
+        if details:
+            error_msg = f"{error_msg}\n{details}"
+        st.error(error_msg)
+        st.info(
+            "Ensure your OpenAI account has access to the selected model or override "
+            "OPENAI_TRANSCRIPTION_MODEL (default 'whisper-1')."
+        )
+        return ""
+
+    payload = resp.json()
+    transcript_text = (payload.get("text") or "").strip()
+    if not transcript_text:
+        st.warning("Transcription completed but returned empty text.")
+    return transcript_text
 
 
 def _login_appointment_api():
@@ -167,6 +231,11 @@ def _call_appointment_summary_api(
         st.error(f"Error parsing Appointment API response JSON: {e}")
         return None
 
+    # Attach metadata used for persistence so the UI can show/edit it later.
+    data.setdefault("appointment_date", today_str)
+    data.setdefault("appointment_doctor", doctor_name)
+    data.setdefault("reason_for_visit", reason)
+
     return data
 
 
@@ -226,6 +295,7 @@ def show_appointment_page(patients_today):
                 state["summary"] = None
                 state["notes"] = ""
                 state["appointment_id"] = None
+                state["transcript"] = None
 
             if state["consent"] == "yes":
                 st.success("Patient consent recorded: audio recording is allowed.")
@@ -247,47 +317,92 @@ def show_appointment_page(patients_today):
             if st.button(main_label, use_container_width=True):
                 state["in_progress"] = True
                 state["summary"] = None
+                state["transcript"] = None
 
         # If in progress, show appropriate UI
         if state["in_progress"]:
             if state["mode"] == "recording":
-                # --- Recording mode UI (placeholder for real mic component) ---
+                # --- Recording mode UI with audio upload/transcription ---
                 with st.container(border=True):
-                    st.subheader("Recording in progress")
+                    st.subheader("Recording Mode")
                     st.markdown(
-                        "🎙️ Audio recording has **started**. "
-                        "Here you can plug in your actual microphone component."
-                    )
-                    st.caption(
-                        "For now this is a placeholder; integrate your own audio "
-                        "capture and streaming to MD-GPT here."
+                        "Upload the consultation audio file once recording concludes. "
+                        "The file will be transcribed using your configured speech-to-text model "
+                        "before generating the appointment summary."
                     )
 
-                    if st.button("End Appointment / Stop Recording", use_container_width=True):
-                        state["in_progress"] = False
+                    audio_key = f"audio_upload_{active_patient['id']}"
+                    audio_file = st.file_uploader(
+                        "Audio file (.mp3, .wav, .m4a, .mp4)",
+                        type=["mp3", "wav", "m4a", "mp4"],
+                        key=audio_key,
+                    )
 
-                        # Placeholder transcript for now
-                        transcript_text = "Auto-generated transcript from recording."
+                    if audio_file:
+                        st.caption(f"Loaded file: **{audio_file.name}** ({audio_file.size / 1024:.1f} KB)")
 
-                        with st.spinner("Generating appointment summary from transcript..."):
-                            api_data = _call_appointment_summary_api(
-                                patient_id=active_patient["id"],
-                                patient_name=active_patient["name"],
-                                input_mode="transcript",
-                                content=transcript_text,
-                                reason_for_visit=active_patient.get("reason"),
-                                appointment_id=state.get("appointment_id"),
-                            )
-
-                        if api_data:
-                            state["summary"] = api_data.get("summary", "")
-                            state["appointment_id"] = api_data.get("appointment_id")
+                    process_disabled = audio_file is None
+                    if st.button(
+                        "Transcribe Audio & Generate Summary",
+                        use_container_width=True,
+                        disabled=process_disabled,
+                        key=f"process_audio_{active_patient['id']}",
+                    ):
+                        if not audio_file:
+                            st.error("Please upload an audio file before processing.")
                         else:
-                            # Fallback to mock summary if API fails
-                            state["summary"] = _mock_summarize_notes(
-                                transcript_text,
-                                active_patient["name"],
-                            )
+                            with st.spinner("Transcribing audio..."):
+                                transcript_text = _transcribe_audio_file(audio_file)
+
+                            if transcript_text:
+                                state["transcript"] = transcript_text
+                                state["in_progress"] = False
+                                with st.spinner("Generating appointment summary from transcript..."):
+                                    api_data = _call_appointment_summary_api(
+                                        patient_id=active_patient["id"],
+                                        patient_name=active_patient["name"],
+                                        input_mode="transcript",
+                                        content=transcript_text,
+                                        reason_for_visit=active_patient.get("reason"),
+                                        appointment_id=state.get("appointment_id"),
+                                    )
+
+                                if api_data:
+                                    state["summary"] = api_data.get("summary", "")
+                                    state["appointment_id"] = api_data.get("appointment_id")
+                                    state["summary_fields"] = {
+                                        "appointment_id": api_data.get("appointment_id"),
+                                        "patient_id": api_data.get("patient_id", active_patient["id"]),
+                                        "appointment_date": api_data.get("appointment_date", today_str := date.today().isoformat()),
+                                        "appointment_doctor": api_data.get("appointment_doctor", DEFAULT_DOCTOR_NAME),
+                                        "reason_for_visit": api_data.get("reason_for_visit") or active_patient.get("reason") or "",
+                                        "appointment_symptoms": api_data.get("symptoms", ""),
+                                        "diagnosis": api_data.get("diagnosis", ""),
+                                        "therapeutics": api_data.get("therapeutics", ""),
+                                        "follow_up": api_data.get("follow_up", ""),
+                                        "appointment_summary": api_data.get("summary", ""),
+                                    }
+                                    st.success("Audio processed and summary generated.")
+                                else:
+                                    state["summary"] = _mock_summarize_notes(
+                                        transcript_text,
+                                        active_patient["name"],
+                                    )
+                                    state["summary_fields"] = {
+                                        "appointment_id": state.get("appointment_id"),
+                                        "patient_id": active_patient["id"],
+                                        "appointment_date": date.today().isoformat(),
+                                        "appointment_doctor": DEFAULT_DOCTOR_NAME,
+                                        "reason_for_visit": active_patient.get("reason") or "",
+                                        "appointment_symptoms": "",
+                                        "diagnosis": "",
+                                        "therapeutics": "",
+                                        "follow_up": "",
+                                        "appointment_summary": transcript_text,
+                                    }
+                                    st.warning("Appointment API unavailable; showing fallback summary.")
+                            else:
+                                st.error("Unable to transcribe the provided audio file.")
 
             else:
                 # --- Note-taking mode UI ---
@@ -304,6 +419,7 @@ def show_appointment_page(patients_today):
                     if st.button("End Appointment (Generate Summary)", use_container_width=True):
                         state["in_progress"] = False
                         notes_text = state["notes"]
+                        state["transcript"] = None
 
                         if not notes_text.strip():
                             st.warning("No notes entered. A very minimal summary will be generated.")
@@ -320,12 +436,36 @@ def show_appointment_page(patients_today):
                         if api_data:
                             state["summary"] = api_data.get("summary", "")
                             state["appointment_id"] = api_data.get("appointment_id")
+                            state["summary_fields"] = {
+                                "appointment_id": api_data.get("appointment_id"),
+                                "patient_id": api_data.get("patient_id", active_patient["id"]),
+                                "appointment_date": api_data.get("appointment_date", date.today().isoformat()),
+                                "appointment_doctor": api_data.get("appointment_doctor", DEFAULT_DOCTOR_NAME),
+                                "reason_for_visit": api_data.get("reason_for_visit") or active_patient.get("reason") or "",
+                                "appointment_symptoms": api_data.get("symptoms", ""),
+                                "diagnosis": api_data.get("diagnosis", ""),
+                                "therapeutics": api_data.get("therapeutics", ""),
+                                "follow_up": api_data.get("follow_up", ""),
+                                "appointment_summary": api_data.get("summary", ""),
+                            }
                         else:
                             # Fallback to mock summary if API fails
                             state["summary"] = _mock_summarize_notes(
                                 notes_text,
                                 active_patient["name"],
                             )
+                            state["summary_fields"] = {
+                                "appointment_id": state.get("appointment_id"),
+                                "patient_id": active_patient["id"],
+                                "appointment_date": date.today().isoformat(),
+                                "appointment_doctor": DEFAULT_DOCTOR_NAME,
+                                "reason_for_visit": active_patient.get("reason") or "",
+                                "appointment_symptoms": "",
+                                "diagnosis": "",
+                                "therapeutics": "",
+                                "follow_up": "",
+                                "appointment_summary": notes_text,
+                            }
 
     # ------------------ STEP 2: REVIEW STRUCTURED SUMMARY ------------------
     st.markdown("### Step 2: Review Structured Summary")
@@ -334,29 +474,133 @@ def show_appointment_page(patients_today):
         st.info("Once you end the appointment, a structured summary will appear here.")
         return
 
-    # Editable summary area
-    summary_key = f"summary_text_{active_patient['id']}"
-    summary_text = st.text_area(
-        "Structured Summary",
-        value=state["summary"],
-        height=260,
-        key=summary_key,
-        disabled=not state["editing_summary"],
-    )
+    summary_fields = state.get("summary_fields") or {}
+    if not summary_fields:
+        summary_fields = {
+            "appointment_id": state.get("appointment_id"),
+            "patient_id": active_patient["id"],
+            "appointment_date": date.today().isoformat(),
+            "appointment_doctor": DEFAULT_DOCTOR_NAME,
+            "reason_for_visit": active_patient.get("reason") or "",
+            "appointment_symptoms": "",
+            "diagnosis": "",
+            "therapeutics": "",
+            "follow_up": "",
+            "appointment_summary": state["summary"] or "",
+        }
+        state["summary_fields"] = summary_fields
+
+    editable = state["editing_summary"]
+
+    with st.container(border=True):
+        st.subheader("Appointment Metadata")
+        col_meta_a, col_meta_b = st.columns(2)
+        appointment_id_input = col_meta_a.text_input(
+            "Appointment ID",
+            value=summary_fields.get("appointment_id") or "",
+            key=f"appointment_id_{active_patient['id']}",
+            disabled=True,
+        )
+        patient_id_display = col_meta_b.text_input(
+            "Patient ID",
+            value=summary_fields.get("patient_id") or active_patient["id"],
+            key=f"patient_id_{active_patient['id']}",
+            disabled=True,
+        )
+        col_meta_c, col_meta_d = st.columns(2)
+        appointment_date_input = col_meta_c.text_input(
+            "Appointment Date",
+            value=summary_fields.get("appointment_date") or date.today().isoformat(),
+            key=f"appointment_date_{active_patient['id']}",
+            disabled=True,
+        )
+        appointment_doctor_input = col_meta_d.text_input(
+            "Doctor",
+            value=summary_fields.get("appointment_doctor") or DEFAULT_DOCTOR_NAME,
+            key=f"appointment_doctor_{active_patient['id']}",
+            disabled=True,
+        )
+        reason_input = st.text_input(
+            "Reason for Visit",
+            value=summary_fields.get("reason_for_visit") or "",
+            key=f"reason_{active_patient['id']}",
+            disabled=not editable,
+        )
+
+    with st.container(border=True):
+        st.subheader("Clinical Summary Fields")
+        appointment_summary_input = st.text_area(
+            "Appointment Summary",
+            value=summary_fields.get("appointment_summary") or state["summary"] or "",
+            height=220,
+            key=f"summary_text_{active_patient['id']}",
+            disabled=not editable,
+        )
+        symptoms_input = st.text_area(
+            "Symptoms",
+            value=summary_fields.get("appointment_symptoms") or "",
+            key=f"symptoms_{active_patient['id']}",
+            disabled=not editable,
+        )
+        diagnosis_input = st.text_area(
+            "Diagnosis",
+            value=summary_fields.get("diagnosis") or "",
+            key=f"diagnosis_{active_patient['id']}",
+            disabled=not editable,
+        )
+        therapeutics_input = st.text_area(
+            "Therapeutics",
+            value=summary_fields.get("therapeutics") or "",
+            key=f"therapeutics_{active_patient['id']}",
+            disabled=not editable,
+        )
+        follow_up_input = st.text_area(
+            "Follow-up Plan",
+            value=summary_fields.get("follow_up") or "",
+            key=f"follow_up_{active_patient['id']}",
+            disabled=not editable,
+        )
+
+    if state.get("transcript"):
+        with st.expander("View transcript from uploaded audio"):
+            st.text_area(
+                "Audio transcript",
+                value=state["transcript"],
+                height=200,
+                key=f"transcript_{active_patient['id']}",
+                disabled=True,
+            )
+
+    updated_fields = {
+        "appointment_id": appointment_id_input,
+        "patient_id": patient_id_display,
+        "appointment_date": appointment_date_input,
+        "appointment_doctor": appointment_doctor_input,
+        "reason_for_visit": reason_input,
+        "appointment_symptoms": symptoms_input,
+        "diagnosis": diagnosis_input,
+        "therapeutics": therapeutics_input,
+        "follow_up": follow_up_input,
+        "appointment_summary": appointment_summary_input,
+    }
 
     col_a, col_b = st.columns(2)
     with col_a:
-        if not state["editing_summary"]:
+        if not editable:
             if st.button("Edit Summary", use_container_width=True):
                 state["editing_summary"] = True
         else:
             if st.button("Save Summary", use_container_width=True):
-                state["summary"] = summary_text
+                state["summary_fields"] = updated_fields
+                state["summary"] = appointment_summary_input
+                state["appointment_id"] = appointment_id_input or state.get("appointment_id")
                 state["editing_summary"] = False
+                st.success("Summary updated.")
 
     with col_b:
         if st.button("Validate Summary", use_container_width=True):
-            # Here you would persist the final edited summary to your backend / EHR again
+            state["summary_fields"] = updated_fields
+            state["summary"] = appointment_summary_input
+            state["appointment_id"] = appointment_id_input or state.get("appointment_id")
             state["editing_summary"] = False
-            state["summary"] = summary_text
             st.success("Summary validated and saved for this appointment.")
