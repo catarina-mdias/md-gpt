@@ -1,21 +1,16 @@
-# views/exams_comparison.py
+# exams_comparison.py (Streamlit view)
 import os
 from pathlib import Path
 
 import requests
 import streamlit as st
 
-# ---- Config -----------------------------------------------------------------
-
 EXAMS_API_BASE = os.getenv("EXAMS_COMPARISON_API_URL", "http://localhost:10002")
 EXAMS_TEXT_MAX_CHARS = int(os.getenv("EXAM_COMPARISON_MAX_CHARS", "6000"))
 
-# Folder in the repo where the “hospital system” exams live.
-# This should match EXAMS_DIR used by your MCP server.
+# Folder where the public repo exams live (same as EXAMS_DIR used by MCP)
 EXAMS_REPO_DIR = Path(os.getenv("EXAMS_DIR", "exams")).resolve()
 
-
-# ---- Patient helpers --------------------------------------------------------
 
 def _get_active_patient(patients_today):
     pid = st.session_state.get("selected_patient_id")
@@ -43,8 +38,6 @@ def _patient_header(active_patient):
             )
 
 
-# ---- Exams API auth + calling -----------------------------------------------
-
 def _get_exam_api_base() -> str:
     return st.session_state.get("exams_api_base", EXAMS_API_BASE)
 
@@ -56,9 +49,7 @@ def _login_exam_api():
 
     base_url = _get_exam_api_base()
     with st.expander("Login to Exams Comparison API", expanded=True):
-        username = st.text_input(
-            "API Username (exam agent)", key="exam_api_username"
-        )
+        username = st.text_input("API Username (exam agent)", key="exam_api_username")
         password = st.text_input(
             "API Password (exam agent)",
             type="password",
@@ -75,18 +66,12 @@ def _login_exam_api():
                     timeout=10,
                 )
                 if resp.status_code == 200:
-                    data = resp.json()
-                    token = data.get("token")
-                    if not token:
-                        st.error("Login succeeded but no token returned.")
-                        return
+                    token = resp.json().get("token")
                     st.session_state["exams_api_token"] = token
                     st.session_state["exams_api_base"] = base_url
-                    st.success("Logged in to Exams API")
+                    st.success("Login to Exams API successful.")
                 else:
-                    st.error(
-                        f"Login failed ({resp.status_code}): {resp.text}"
-                    )
+                    st.error(f"Login failed: {resp.status_code} - {resp.text}")
             except Exception as exc:
                 st.error(f"Error calling Exams API /login: {exc}")
 
@@ -120,20 +105,15 @@ def _call_exam_comparison_api(payload: dict) -> dict | None:
         return None
 
 
-# ---- Repo exam helpers (replace upload-based flow) --------------------------
+# ---------- Repo exams helpers (instead of upload) ----------
 
 def _list_repo_exams() -> list[Path]:
     """
-    List all exam files in the repo folder.
-
-    By default, this looks under ./exams relative to the project root,
-    but you can override via EXAMS_DIR env var.
+    List all exam files from the repo folder (e.g., ./exams).
+    This simulates the hospital system's stored exams.
     """
     if not EXAMS_REPO_DIR.exists():
         return []
-
-    # You can restrict to specific extensions if you prefer, e.g. "*.pdf".
-    # Here we allow any file, but skip directories.
     files = [
         p for p in sorted(EXAMS_REPO_DIR.rglob("*"))
         if p.is_file()
@@ -143,8 +123,8 @@ def _list_repo_exams() -> list[Path]:
 
 def _read_repo_exam_text(path: Path) -> str:
     """
-    Read a repo exam file as text, using the same decoding strategy
-    that the old upload-based flow used.
+    Read exam file content as text, using the same decoding
+    strategy you previously used for uploaded files.
     """
     try:
         raw = path.read_bytes()
@@ -152,7 +132,7 @@ def _read_repo_exam_text(path: Path) -> str:
         st.error(f"Error reading exam file {path.name}: {exc}")
         return ""
 
-    # path.read_bytes() always returns bytes, but keep the old logic shape.
+    # For symmetry with the old upload logic
     if isinstance(raw, str):
         return raw
 
@@ -164,8 +144,6 @@ def _read_repo_exam_text(path: Path) -> str:
 
     return ""
 
-
-# ---- Comparison pipeline ----------------------------------------------------
 
 def _process_exam_comparison(
     active_patient,
@@ -193,31 +171,15 @@ def _process_exam_comparison(
 
     if not exam_a_text or not exam_b_text:
         st.error(
-            "Could not read one of the selected files. "
+            "Could not read one of the files. "
             "Ensure they are text-based (txt/csv or text-based PDF)."
         )
         return None
 
-    if len(exam_a_text) > EXAMS_TEXT_MAX_CHARS:
-        st.info(
-            f"Exam A text exceeds {EXAMS_TEXT_MAX_CHARS} characters; "
-            "it will be truncated for analysis."
-        )
-    if len(exam_b_text) > EXAMS_TEXT_MAX_CHARS:
-        st.info(
-            f"Exam B text exceeds {EXAMS_TEXT_MAX_CHARS} characters; "
-            "it will be truncated for analysis."
-        )
-
-    # Truncate to max length
     exam_a_text = exam_a_text[:EXAMS_TEXT_MAX_CHARS]
     exam_b_text = exam_b_text[:EXAMS_TEXT_MAX_CHARS]
 
-    markers = [
-        m.strip()
-        for m in (focus_markers_str or "").split(",")
-        if m.strip()
-    ]
+    markers = [m.strip() for m in (focus_markers_str or "").split(",") if m.strip()]
 
     payload = {
         "patient_id": active_patient["id"] if active_patient else None,
@@ -236,62 +198,34 @@ def _process_exam_comparison(
         "session_id": st.session_state.get("session_id"),
     }
 
-    with st.spinner("Comparing exam reports from hospital repository..."):
+    with st.spinner("Comparing exam reports from repository..."):
         return _call_exam_comparison_api(payload)
 
 
 def _render_comparison_results(result: dict) -> None:
+    """
+    Keep the same rendering as your original version:
+    show only the markdown `summary` from the API.
+    That summary is where the LLM will output the table.
+    """
     st.markdown("### Summary")
-    st.write(result.get("summary") or "No summary provided.")
+    summary = result.get("summary") or "No summary provided."
+    st.markdown(summary)
 
-    def _render_list(title: str, items: list[str], empty_text: str):
-        st.markdown(f"#### {title}")
-        if not items:
-            st.caption(empty_text)
-            return
-        for item in items:
-            st.markdown(f"- {item}")
-
-    _render_list(
-        "Improvements / Positive Trends",
-        result.get("key_improvements", []),
-        "No improvements detected.",
-    )
-    _render_list(
-        "Declines / Worsening Findings",
-        result.get("key_declines", []),
-        "No declines detected.",
-    )
-    _render_list(
-        "Urgent Flags",
-        result.get("urgent_flags", []),
-        "No urgent flags.",
-    )
-    _render_list(
-        "Recommendations",
-        result.get("recommendations", []),
-        "No specific recommendations.",
-    )
-
-
-# ---- Main view --------------------------------------------------------------
 
 def show_exams_comparison(patients_today):
     active_patient = _get_active_patient(patients_today)
-
     _patient_header(active_patient)
 
     st.markdown("## Exams Comparison")
     st.caption(
-        "Select the baseline and most recent exams from the hospital repository "
-        "(read-only exams folder in this project) to generate a summary of changes "
+        "Select the baseline exam and the most recent exam from the hospital repository "
+        "(public exams folder in this project) to generate a tabular summary of changes "
         "using the MD-GPT exam comparison agent."
     )
 
-    # Login to backend comparison API
     _login_exam_api()
 
-    # List repo exams for selection
     exam_files = _list_repo_exams()
     if not exam_files:
         st.warning(
@@ -300,7 +234,7 @@ def show_exams_comparison(patients_today):
         )
         return
 
-    # Build nice labels relative to EXAMS_REPO_DIR
+    # Build labels relative to EXAMS_REPO_DIR for nicer display
     labels_to_paths = {
         str(p.relative_to(EXAMS_REPO_DIR)): p for p in exam_files
     }
@@ -310,43 +244,25 @@ def show_exams_comparison(patients_today):
     with col_a:
         st.subheader("Exam A (previous / baseline)")
         default_a_index = 0
-        exam_a_label_choice = st.selectbox(
+        exam_a_choice = st.selectbox(
             "Select baseline exam from repository",
             options=all_labels,
             index=default_a_index,
             key="exam_a_repo_choice",
         )
-        exam_a_label = st.text_input(
-            "Exam A Label",
-            value="Previous Blood Exam",
-            key="exam_a_label",
-        )
-        exam_a_date = st.text_input(
-            "Exam A Date",
-            value="",
-            key="exam_a_date",
-        )
-
+        exam_a_label = st.text_input("Exam A Label", value="Previous Blood Exam")
+        exam_a_date = st.text_input("Exam A Date", value="")
     with col_b:
         st.subheader("Exam B (current)")
-        # Try to pick a different default (e.g., the next file) if possible
         default_b_index = 1 if len(all_labels) > 1 else 0
-        exam_b_label_choice = st.selectbox(
-            "Select current exam from repository",
+        exam_b_choice = st.selectbox(
+            "Select latest exam from repository",
             options=all_labels,
             index=default_b_index,
             key="exam_b_repo_choice",
         )
-        exam_b_label = st.text_input(
-            "Exam B Label",
-            value="Latest Blood Exam",
-            key="exam_b_label",
-        )
-        exam_b_date = st.text_input(
-            "Exam B Date",
-            value="",
-            key="exam_b_date",
-        )
+        exam_b_label = st.text_input("Exam B Label", value="Latest Blood Exam")
+        exam_b_date = st.text_input("Exam B Date", value="")
 
     focus_markers = st.text_input(
         "Optional: biomarkers to focus on (comma separated)",
@@ -355,8 +271,8 @@ def show_exams_comparison(patients_today):
 
     comparison_result = None
     if st.button("Compare Exams", use_container_width=True):
-        exam_a_path = labels_to_paths.get(exam_a_label_choice)
-        exam_b_path = labels_to_paths.get(exam_b_label_choice)
+        exam_a_path = labels_to_paths.get(exam_a_choice)
+        exam_b_path = labels_to_paths.get(exam_b_choice)
 
         comparison_result = _process_exam_comparison(
             active_patient,
@@ -375,6 +291,7 @@ def show_exams_comparison(patients_today):
 
     st.markdown("---")
     st.caption(
-        "The exam comparison agent uses uploaded blood test exams and highlights the main differences between two lab tests."
+        "The exam comparison agent now uses exams stored in the repository "
+        "(hospital-like system) and outputs a markdown table summarizing the "
+        "lab marker differences."
     )
-
