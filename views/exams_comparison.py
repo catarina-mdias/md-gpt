@@ -218,11 +218,6 @@ def show_exams_comparison(patients_today):
     _patient_header(active_patient)
 
     st.markdown("## Exams Comparison")
-    st.caption(
-        "Select the baseline exam and the most recent exam from the hospital repository "
-        "(public exams folder in this project) to generate a tabular summary of changes "
-        "using the MD-GPT exam comparison agent."
-    )
 
     _login_exam_api()
 
