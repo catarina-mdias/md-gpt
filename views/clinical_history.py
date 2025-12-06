@@ -3,7 +3,6 @@ import os
 import requests
 import streamlit as st
 
-
 API_BASE_URL = os.getenv("CLINICAL_API_URL", "http://localhost:8000")
 
 
@@ -64,38 +63,6 @@ def _patient_header(active_patient):
         st.caption("Current Key Tags: " + (", ".join(editable_tags) or "None"))
 
 
-def _login_block():
-    """Simple login UI to obtain and store API token."""
-    if "api_token" in st.session_state and st.session_state.api_token:
-        st.success("Logged in to MD-GPT API")
-        return
-
-    # Use the same base URL configured in app.py sidebar
-    base_url = st.session_state.get("api_base", API_BASE_URL)
-
-    with st.expander("Login to MD-GPT API", expanded=True):
-        username = st.text_input("API Username", key="api_username")
-        password = st.text_input("API Password", type="password", key="api_password")
-        if st.button("Login to API", key="login_api_button"):
-            if not username or not password:
-                st.error("Please enter username and password.")
-                return
-            try:
-                resp = requests.post(
-                    f"{base_url}/login",
-                    json={"username": username, "password": password},
-                    timeout=10,
-                )
-                if resp.status_code == 200:
-                    token = resp.json().get("token")
-                    st.session_state["api_token"] = token
-                    st.success("Login successful. Token stored.")
-                else:
-                    st.error(f"Login failed: {resp.status_code} - {resp.text}")
-            except Exception as e:
-                st.error(f"Error calling API: {e}")
-
-
 def _call_clinical_history_api(
     patient_id: str,
     categories: list[str],
@@ -105,7 +72,10 @@ def _call_clinical_history_api(
     """Call the FastAPI /clinical-history endpoint and return the summary text."""
     token = st.session_state.get("api_token")
     if not token:
-        st.error("No API token. Please log in to the API first.")
+        st.error(
+            "No API token available. The unified MD-GPT API login is done on the first page; "
+            "please log out and sign in again if this persists."
+        )
         return ""
 
     # Use the same base URL configured in app.py sidebar
@@ -122,7 +92,6 @@ def _call_clinical_history_api(
         resp = requests.post(
             f"{base_url}/clinical-history",
             json=payload,
-            # IMPORTANT: header name must match FastAPI parameter x_auth_token
             headers={"x_auth_token": token},
             timeout=30,
         )
@@ -145,13 +114,10 @@ def show_clinical_history_page(patients_today):
     if not active_patient:
         return
 
-    # ---------- API Login ----------
-    _login_block()
-
     st.markdown("## Patient Clinical History Summarization")
     st.caption(
         "Summarize the patient's clinical history based on selected categories and detail level, "
-        "using the MD-GPT agent."
+        "using the MD-GPT unified API."
     )
 
     col_left, col_right = st.columns([2, 2])
