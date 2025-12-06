@@ -9,12 +9,12 @@ import requests
 import streamlit as st
 from dotenv import load_dotenv
 
+load_dotenv()
+
 from views.dashboard import show_dashboard
 from views.exams_comparison import show_exams_comparison
 from views.appointment import show_appointment_page
 from views.clinical_history import show_clinical_history_page
-
-load_dotenv()
 
 st.set_page_config(
     page_title="MD-GPT Clinical Assistant",
