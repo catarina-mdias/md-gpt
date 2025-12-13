@@ -13,6 +13,28 @@ TRANSCRIPTION_ENDPOINT = os.getenv(
     "OPENAI_TRANSCRIPTION_URL", "https://api.openai.com/v1/audio/transcriptions"
 )
 
+APPOINTMENT_AUDIO_MAP = {
+    "P001": "appointment_recordings/appointment_P001.m4a",
+    "P021": "appointment_recordings/appointment_P021.m4a",
+}
+
+
+class DummyUploadedFile:
+    """
+    Minimal wrapper to mimic Streamlit's UploadedFile
+    for local audio files used in demo / prerecorded mode.
+    """
+
+    def __init__(self, path: str):
+        self.path = path
+        self.name = os.path.basename(path)
+        self.type = "audio/m4a"
+
+    def getvalue(self) -> bytes:
+        with open(self.path, "rb") as f:
+            return f.read()
+
+
 
 def _get_active_patient(patients_today):
     pid = st.session_state.get("selected_patient_id")
@@ -292,78 +314,79 @@ def show_appointment_page(patients_today):
                         "before generating the appointment summary."
                     )
 
-                    audio_key = f"audio_upload_{active_patient['id']}"
-                    audio_file = st.file_uploader(
-                        "Audio file (.mp3, .wav, .m4a, .mp4)",
-                        type=["mp3", "wav", "m4a", "mp4"],
-                        key=audio_key,
+                    audio_value = st.audio_input(
+                        "Record a voice message",
+                        key=f"audio_input_{active_patient['id']}",
                     )
 
-                    if audio_file:
-                        st.caption(f"Loaded file: **{audio_file.name}** ({audio_file.size / 1024:.1f} KB)")
+                    # The recorded audio is intentionally NOT used.
+                    # We only trigger processing when the recording finishes.
+                    if audio_value:
+                        with st.spinner("Transcribing audio..."):
+                            audio_path = APPOINTMENT_AUDIO_MAP.get(active_patient["id"])
+                            if not audio_path or not os.path.exists(audio_path):
+                                st.error("Audio file not found.")
+                                return
 
-                    process_disabled = audio_file is None
-                    if st.button(
-                        "Transcribe Audio & Generate Summary",
-                        use_container_width=True,
-                        disabled=process_disabled,
-                        key=f"process_audio_{active_patient['id']}",
-                    ):
-                        if not audio_file:
-                            st.error("Please upload an audio file before processing.")
-                        else:
-                            with st.spinner("Transcribing audio..."):
-                                transcript_text = _transcribe_audio_file(audio_file)
+                            dummy_file = DummyUploadedFile(audio_path)
+                            transcript_text = _transcribe_audio_file(dummy_file)
 
-                            if transcript_text:
-                                state["transcript"] = transcript_text
-                                state["in_progress"] = False
-                                with st.spinner("Generating appointment summary from transcript..."):
-                                    api_data = _call_appointment_summary_api(
-                                        patient_id=active_patient["id"],
-                                        patient_name=active_patient["name"],
-                                        input_mode="transcript",
-                                        content=transcript_text,
-                                        reason_for_visit=active_patient.get("reason"),
-                                        appointment_id=state.get("appointment_id"),
-                                    )
+                        if transcript_text:
+                            state["transcript"] = transcript_text
+                            state["in_progress"] = False
 
-                                if api_data:
-                                    state["summary"] = api_data.get("summary", "")
-                                    state["appointment_id"] = api_data.get("appointment_id")
-                                    state["summary_fields"] = {
-                                        "appointment_id": api_data.get("appointment_id"),
-                                        "patient_id": api_data.get("patient_id", active_patient["id"]),
-                                        "appointment_date": api_data.get("appointment_date", today_str := date.today().isoformat()),
-                                        "appointment_doctor": api_data.get("appointment_doctor", DEFAULT_DOCTOR_NAME),
-                                        "reason_for_visit": api_data.get("reason_for_visit") or active_patient.get("reason") or "",
-                                        "appointment_symptoms": api_data.get("symptoms", ""),
-                                        "diagnosis": api_data.get("diagnosis", ""),
-                                        "therapeutics": api_data.get("therapeutics", ""),
-                                        "follow_up": api_data.get("follow_up", ""),
-                                        "appointment_summary": api_data.get("summary", ""),
-                                    }
-                                    st.success("Audio processed and summary generated.")
-                                else:
-                                    state["summary"] = _mock_summarize_notes(
-                                        transcript_text,
-                                        active_patient["name"],
-                                    )
-                                    state["summary_fields"] = {
-                                        "appointment_id": state.get("appointment_id"),
-                                        "patient_id": active_patient["id"],
-                                        "appointment_date": date.today().isoformat(),
-                                        "appointment_doctor": DEFAULT_DOCTOR_NAME,
-                                        "reason_for_visit": active_patient.get("reason") or "",
-                                        "appointment_symptoms": "",
-                                        "diagnosis": "",
-                                        "therapeutics": "",
-                                        "follow_up": "",
-                                        "appointment_summary": transcript_text,
-                                    }
-                                    st.warning("Appointment API unavailable; showing fallback summary.")
+                            with st.spinner("Generating appointment summary from transcript..."):
+                                api_data = _call_appointment_summary_api(
+                                    patient_id=active_patient["id"],
+                                    patient_name=active_patient["name"],
+                                    input_mode="transcript",
+                                    content=transcript_text,
+                                    reason_for_visit=active_patient.get("reason"),
+                                    appointment_id=state.get("appointment_id"),
+                                )
+
+                            if api_data:
+                                state["summary"] = api_data.get("summary", "")
+                                state["appointment_id"] = api_data.get("appointment_id")
+                                state["summary_fields"] = {
+                                    "appointment_id": api_data.get("appointment_id"),
+                                    "patient_id": api_data.get("patient_id", active_patient["id"]),
+                                    "appointment_date": api_data.get(
+                                        "appointment_date", date.today().isoformat()
+                                    ),
+                                    "appointment_doctor": api_data.get(
+                                        "appointment_doctor", DEFAULT_DOCTOR_NAME
+                                    ),
+                                    "reason_for_visit": api_data.get("reason_for_visit")
+                                                        or active_patient.get("reason")
+                                                        or "",
+                                    "appointment_symptoms": api_data.get("symptoms", ""),
+                                    "diagnosis": api_data.get("diagnosis", ""),
+                                    "therapeutics": api_data.get("therapeutics", ""),
+                                    "follow_up": api_data.get("follow_up", ""),
+                                    "appointment_summary": api_data.get("summary", ""),
+                                }
+                                st.success("Audio processed and summary generated.")
                             else:
-                                st.error("Unable to transcribe the provided audio file.")
+                                state["summary"] = _mock_summarize_notes(
+                                    transcript_text,
+                                    active_patient["name"],
+                                )
+                                state["summary_fields"] = {
+                                    "appointment_id": state.get("appointment_id"),
+                                    "patient_id": active_patient["id"],
+                                    "appointment_date": date.today().isoformat(),
+                                    "appointment_doctor": DEFAULT_DOCTOR_NAME,
+                                    "reason_for_visit": active_patient.get("reason") or "",
+                                    "appointment_symptoms": "",
+                                    "diagnosis": "",
+                                    "therapeutics": "",
+                                    "follow_up": "",
+                                    "appointment_summary": transcript_text,
+                                }
+                                st.warning("Appointment API unavailable; showing fallback summary.")
+                        else:
+                            st.error("Unable to transcribe the audio.")
 
             else:
                 # --- Note-taking mode UI ---
