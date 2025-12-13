@@ -5,8 +5,7 @@ import streamlit as st
 import pandas as pd  # kept in case you add tables later
 from datetime import date
 
-# Base URL for the appointment summarization API
-APPOINTMENT_API_BASE = os.getenv("APPOINTMENT_API_URL", "http://localhost:10001")
+# We now use the unified API base from app.py (st.session_state.api_base)
 DEFAULT_DOCTOR_NAME = os.getenv("DEFAULT_DOCTOR_NAME", "Dr. MD-GPT")
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 TRANSCRIPTION_MODEL = os.getenv("OPENAI_TRANSCRIPTION_MODEL", "whisper-1")
@@ -132,44 +131,6 @@ def _transcribe_audio_file(uploaded_file) -> str:
     return transcript_text
 
 
-def _login_appointment_api():
-    """
-    Login to the Appointment Summarization API and store its token in session_state.
-
-    Uses AGENT_API_USERNAME / AGENT_API_PASSWORD (same as other agents),
-    but this FastAPI app has its own token store, so we keep a separate token.
-    """
-    # If we already have a token, don't log in again
-    if "appointment_api_token" in st.session_state and st.session_state.appointment_api_token:
-        st.success("Logged in to Appointment API")
-        return
-
-    # Allow overriding base URL via session_state if you ever set it from app.py
-    base_url = st.session_state.get("appointment_api_base", APPOINTMENT_API_BASE)
-
-    with st.expander("Login to Appointment API", expanded=True):
-        username = st.text_input("API Username (appointment agent)", key="appt_api_username")
-        password = st.text_input("API Password (appointment agent)", type="password", key="appt_api_password")
-        if st.button("Login to Appointment API", key="login_appt_api_button"):
-            if not username or not password:
-                st.error("Please enter username and password.")
-                return
-            try:
-                resp = requests.post(
-                    f"{base_url}/login",
-                    json={"username": username, "password": password},
-                    timeout=10,
-                )
-                if resp.status_code == 200:
-                    token = resp.json().get("token")
-                    st.session_state["appointment_api_token"] = token
-                    st.success("Login to Appointment API successful. Token stored.")
-                else:
-                    st.error(f"Login failed: {resp.status_code} - {resp.text}")
-            except Exception as e:
-                st.error(f"Error calling Appointment API /login: {e}")
-
-
 def _call_appointment_summary_api(
     patient_id: str,
     patient_name: str,
@@ -179,7 +140,7 @@ def _call_appointment_summary_api(
     appointment_id: str | None = None,
 ) -> dict | None:
     """
-    Call the FastAPI /appointment-summary endpoint and return the parsed JSON,
+    Call the unified FastAPI /appointment-summary endpoint and return the parsed JSON,
     or None on failure.
 
     The backend will:
@@ -187,12 +148,15 @@ def _call_appointment_summary_api(
     - fill symptoms/diagnosis/therapeutics/follow_up fields
     - persist them into clinical_data.json
     """
-    token = st.session_state.get("appointment_api_token")
+    token = st.session_state.get("api_token")
     if not token:
-        st.error("No Appointment API token. Please log in to the Appointment API first.")
+        st.error(
+            "No API token available. The MD-GPT API login is done at the app entry page; "
+            "please log out and sign in again if this persists."
+        )
         return None
 
-    base_url = st.session_state.get("appointment_api_base", APPOINTMENT_API_BASE)
+    base_url = st.session_state.get("api_base", "http://localhost:8000")
 
     # Basic metadata – you can refine this later to use real schedule/doctor data
     today_str = date.today().isoformat()
@@ -250,9 +214,6 @@ def show_appointment_page(patients_today):
         return
 
     state = _get_patient_appt_state(active_patient["id"])
-
-    # ---------- API Login ----------
-    _login_appointment_api()
 
     st.markdown("## Appointment Summarization")
     st.caption(

@@ -1,11 +1,10 @@
-# exams_comparison.py (Streamlit view)
+# views/exams_comparison.py
 import os
 from pathlib import Path
 
 import requests
 import streamlit as st
 
-EXAMS_API_BASE = os.getenv("EXAMS_COMPARISON_API_URL", "http://localhost:10002")
 EXAMS_TEXT_MAX_CHARS = int(os.getenv("EXAM_COMPARISON_MAX_CHARS", "6000"))
 
 # Folder where the public repo exams live (same as EXAMS_DIR used by MCP)
@@ -38,51 +37,16 @@ def _patient_header(active_patient):
             )
 
 
-def _get_exam_api_base() -> str:
-    return st.session_state.get("exams_api_base", EXAMS_API_BASE)
-
-
-def _login_exam_api():
-    if "exams_api_token" in st.session_state and st.session_state.exams_api_token:
-        st.success("Logged in to Exams API")
-        return
-
-    base_url = _get_exam_api_base()
-    with st.expander("Login to Exams Comparison API", expanded=True):
-        username = st.text_input("API Username (exam agent)", key="exam_api_username")
-        password = st.text_input(
-            "API Password (exam agent)",
-            type="password",
-            key="exam_api_password",
-        )
-        if st.button("Login to Exams API", key="login_exam_api_button"):
-            if not username or not password:
-                st.error("Please enter username and password.")
-                return
-            try:
-                resp = requests.post(
-                    f"{base_url}/login",
-                    json={"username": username, "password": password},
-                    timeout=10,
-                )
-                if resp.status_code == 200:
-                    token = resp.json().get("token")
-                    st.session_state["exams_api_token"] = token
-                    st.session_state["exams_api_base"] = base_url
-                    st.success("Login to Exams API successful.")
-                else:
-                    st.error(f"Login failed: {resp.status_code} - {resp.text}")
-            except Exception as exc:
-                st.error(f"Error calling Exams API /login: {exc}")
-
-
 def _call_exam_comparison_api(payload: dict) -> dict | None:
-    token = st.session_state.get("exams_api_token")
+    token = st.session_state.get("api_token")
     if not token:
-        st.error("No Exams API token. Please log in first.")
+        st.error(
+            "No API token available. The MD-GPT API login is done at the app entry page; "
+            "please log out and sign in again if this persists."
+        )
         return None
 
-    base_url = _get_exam_api_base()
+    base_url = st.session_state.get("api_base", "http://localhost:8000")
     try:
         resp = requests.post(
             f"{base_url}/exams-comparison",
@@ -218,8 +182,6 @@ def show_exams_comparison(patients_today):
     _patient_header(active_patient)
 
     st.markdown("## Exams Comparison")
-
-    _login_exam_api()
 
     exam_files = _list_repo_exams()
     if not exam_files:
