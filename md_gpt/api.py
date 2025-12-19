@@ -180,16 +180,19 @@ def appointment_summary(
 
     Request/response models imported from appointment_summary_agent.py.
     """
-    result = run_appointment_agent(
-        patient_id=payload.patient_id,
-        input_mode=payload.input_mode,
-        raw_input=payload.content,
-        appointment_id=payload.appointment_id,
-        appointment_date=payload.appointment_date,
-        appointment_doctor=payload.appointment_doctor,
-        reason_for_visit=payload.reason_for_visit,
-        session_id=payload.session_id,
-    )
+    try:
+        result = run_appointment_agent(
+            patient_id=payload.patient_id,
+            input_mode=payload.input_mode,
+            raw_input=payload.content,
+            appointment_id=payload.appointment_id,
+            appointment_date=payload.appointment_date,
+            appointment_doctor=payload.appointment_doctor,
+            reason_for_visit=payload.reason_for_visit,
+            session_id=payload.session_id,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     return AppointmentSummaryResponse(
         patient_id=result["patient_id"],

@@ -13,3 +13,4 @@ tavily-python == 0.7.12
 numpy>=1.26
 guardrails-ai
 mcp[cli]>=0.1
+guardrails-ai
