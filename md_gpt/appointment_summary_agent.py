@@ -35,6 +35,8 @@ from langgraph.graph import StateGraph, END
 # --- Langfuse imports -------------------------------------------------------
 from langfuse import get_client
 from langfuse.langchain import CallbackHandler
+from guardrails import Guard
+from guardrails.hub import RestrictToTopic
 
 
 # ---------------------------------------------------------------------------
@@ -297,6 +299,49 @@ llm = ChatOpenAI(
     api_key=OPENAI_API_KEY,
 )
 
+# Guardrails setup to ensure generated summaries stay in the medical domain
+HEALTH_TOPIC_GUARD = Guard().use(
+    RestrictToTopic(
+        valid_topics=[
+            "health",
+            "medicine",
+            "patient care",
+            "clinical diagnostics",
+            "pharmacology",
+            "symptoms and therapeutics",
+            "treatment recommendations",
+        ],
+        invalid_topics=[
+            "sports",
+            "entertainment",
+            "politics",
+            "finance",
+            "music",
+            "general news",
+        ],
+        disable_classifier=True,
+        disable_llm=False,
+    )
+)
+
+
+def _validate_health_topic(field_name: str, value: Optional[str]) -> str:
+    """
+    Ensure Guardrails approves the generated text as health-related.
+    Raising ValueError aborts the request upstream (FastAPI returns 400/500).
+    """
+    if not value or not value.strip():
+        return value or ""
+
+    try:
+        HEALTH_TOPIC_GUARD.validate(value)
+    except Exception as exc:
+        raise ValueError(
+            f"Guardrails rejected the {field_name} content as non-health related: {exc}"
+        ) from exc
+
+    return value
+
 
 def build_patient_context(patient_id: str) -> str:
     """
@@ -495,6 +540,8 @@ def run_appointment_agent(
     - appointment_date, appointment_doctor, reason_for_visit: optional metadata
     - session_id: optional session key to group traces in Langfuse
     """
+    _validate_health_topic("appointment input", raw_input)
+
     initial: AppointmentSummaryState = {
         "patient_id": patient_id,
         "input_mode": input_mode,
@@ -529,13 +576,18 @@ def run_appointment_agent(
         print("[Langfuse] Not configured or auth failed. Running without tracing.")
         result = appointment_graph.invoke(initial)
 
+    validated_fields = {
+        name: _validate_health_topic(name, result.get(name, ""))
+        for name in ("summary", "symptoms", "diagnosis", "therapeutics", "follow_up")
+    }
+
     return {
         "patient_id": patient_id,
-        "summary": result["summary"],
-        "symptoms": result.get("symptoms", ""),
-        "diagnosis": result.get("diagnosis", ""),
-        "therapeutics": result.get("therapeutics", ""),
-        "follow_up": result.get("follow_up", ""),
+        "summary": validated_fields["summary"],
+        "symptoms": validated_fields["symptoms"],
+        "diagnosis": validated_fields["diagnosis"],
+        "therapeutics": validated_fields["therapeutics"],
+        "follow_up": validated_fields["follow_up"],
         "appointment_id": result["final_appointment_id"],
     }
 
@@ -632,16 +684,19 @@ def appointment_summary(
     - Requires valid x_auth_token header from /login.
     - Returns the generated summary and the appointment_id written to the DB.
     """
-    result = run_appointment_agent(
-        patient_id=payload.patient_id,
-        input_mode=payload.input_mode,
-        raw_input=payload.content,
-        appointment_id=payload.appointment_id,
-        appointment_date=payload.appointment_date,
-        appointment_doctor=payload.appointment_doctor,
-        reason_for_visit=payload.reason_for_visit,
-        session_id=payload.session_id,
-    )
+    try:
+        result = run_appointment_agent(
+            patient_id=payload.patient_id,
+            input_mode=payload.input_mode,
+            raw_input=payload.content,
+            appointment_id=payload.appointment_id,
+            appointment_date=payload.appointment_date,
+            appointment_doctor=payload.appointment_doctor,
+            reason_for_visit=payload.reason_for_visit,
+            session_id=payload.session_id,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     return AppointmentSummaryResponse(
         patient_id=result["patient_id"],
